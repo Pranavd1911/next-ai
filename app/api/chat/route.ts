@@ -119,22 +119,40 @@ export async function POST(req: Request) {
       );
     }
 
-    const { error: insertError } = await supabaseAdmin.from("usage_logs").insert({
-      user_id: isGuest ? null : userId,
-      guest_id: isGuest ? guestId : null,
-      feature: "chat",
-      count: 1
-    });
+    const assistantReply =
+      openaiData?.choices?.[0]?.message?.content || "No response received.";
 
-    if (insertError) {
+    await supabaseAdmin.from("messages").insert([
+      {
+        chat_id: guestId || userId || "guest",
+        role: "user",
+        content: messages?.[messages.length - 1]?.content || ""
+      },
+      {
+        chat_id: guestId || userId || "guest",
+        role: "assistant",
+        content: assistantReply
+      }
+    ]);
+
+    const { error: insertUsageError } = await supabaseAdmin
+      .from("usage_logs")
+      .insert({
+        user_id: isGuest ? null : userId,
+        guest_id: isGuest ? guestId : null,
+        feature: "chat",
+        count: 1
+      });
+
+    if (insertUsageError) {
       return NextResponse.json(
-        { error: `Failed to store usage log: ${insertError.message}` },
+        { error: `Failed to store usage log: ${insertUsageError.message}` },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
-      reply: openaiData?.choices?.[0]?.message?.content || "No response received.",
+      reply: assistantReply,
       usage: {
         usedToday: usedToday + 1,
         limit

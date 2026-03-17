@@ -2,7 +2,18 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
-    const { prompt } = await req.json();
+    const body = await req.json();
+
+    const prompt =
+      body.prompt ||
+      body.messages?.[body.messages.length - 1]?.content;
+
+    if (!prompt) {
+      return NextResponse.json(
+        { error: "Prompt is required." },
+        { status: 400 }
+      );
+    }
 
     const response = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
@@ -13,29 +24,40 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: "gpt-image-1",
         prompt,
-        size: "1024x1024",
-        quality: "medium"
+        size: "1024x1024"
       })
     });
 
     const data = await response.json();
 
     if (!response.ok) {
+      console.log("IMAGE ERROR:", data);
       return NextResponse.json(
-        { error: data?.error?.message || "Image generation failed." },
+        { error: data?.error?.message || "Image generation failed" },
         { status: 500 }
       );
     }
 
-    const b64 = data?.data?.[0]?.b64_json;
-    if (!b64) {
-      return NextResponse.json({ error: "No image returned." }, { status: 500 });
+    // ✅ HANDLE BOTH CASES
+    let imageUrl = data?.data?.[0]?.url;
+
+    if (!imageUrl && data?.data?.[0]?.b64_json) {
+      imageUrl = `data:image/png;base64,${data.data[0].b64_json}`;
     }
 
-    return NextResponse.json({
-      imageUrl: `data:image/png;base64,${b64}`
-    });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to generate image." }, { status: 500 });
+    if (!imageUrl) {
+      return NextResponse.json(
+        { error: "No image returned from API" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ url: imageUrl });
+
+  } catch (err) {
+    return NextResponse.json(
+      { error: "Something went wrong." },
+      { status: 500 }
+    );
   }
 }
