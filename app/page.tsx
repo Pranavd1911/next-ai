@@ -8,26 +8,41 @@ type Msg = {
   content: string;
 };
 
-type HistoryItem = {
+type ChatItem = {
   id: string;
-  content: string;
-  role: string;
+  title: string;
 };
 
 export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [history, setHistory] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState("general");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+
+  const guestId = typeof window !== "undefined" ? getGuestId() : null;
 
   async function loadHistory() {
-    try {
-      const res = await fetch("/api/history");
-      const data = await res.json();
-      setHistory(Array.isArray(data) ? data : []);
-    } catch {
-      setHistory([]);
+    if (!guestId) return;
+    const res = await fetch(`/api/history?guestId=${guestId}`);
+    const data = await res.json();
+    setHistory(Array.isArray(data) ? data : []);
+  }
+
+  async function loadChat(chatId: string) {
+    const res = await fetch(`/api/chat-messages?chatId=${chatId}`);
+    const data = await res.json();
+
+    if (Array.isArray(data)) {
+      setMessages(
+        data.map((m: any) => ({
+          role: m.role,
+          content: m.content
+        }))
+      );
+      setActiveChatId(chatId);
     }
   }
 
@@ -35,16 +50,21 @@ export default function Home() {
     loadHistory();
   }, []);
 
-  async function sendMessage() {
-    if (!input.trim()) return;
+  async function sendMessage(customMessages?: Msg[]) {
+    const nextMessages = customMessages
+      ? customMessages
+      : [...messages, { role: "user", content: input }];
 
-    const nextMessages = [...messages, { role: "user", content: input }];
-    setMessages(nextMessages);
-    setInput("");
+    if (!customMessages && !input.trim()) return;
+
+    if (!customMessages) {
+      setMessages(nextMessages);
+      setInput("");
+    }
+
     setLoading(true);
 
     try {
-      const guestId = getGuestId();
       const endpoint = mode === "image" ? "/api/image" : "/api/chat";
 
       const res = await fetch(endpoint, {
@@ -55,7 +75,8 @@ export default function Home() {
         body: JSON.stringify({
           messages: nextMessages,
           mode,
-          guestId
+          guestId,
+          chatId: activeChatId
         })
       });
 
@@ -66,6 +87,10 @@ export default function Home() {
         ...nextMessages,
         { role: "assistant", content: reply || data.error || "..." }
       ]);
+
+      if (data.chatId && !activeChatId) {
+        setActiveChatId(data.chatId);
+      }
     } catch {
       setMessages([
         ...nextMessages,
@@ -77,64 +102,157 @@ export default function Home() {
     }
   }
 
-  async function deleteHistoryItem(id: string) {
-    await fetch(`/api/delete?id=${id}`, {
-      method: "DELETE"
-    });
+  async function regenerateLastReply() {
+    const trimmed = [...messages];
+    if (!trimmed.length) return;
+    if (trimmed[trimmed.length - 1]?.role === "assistant") {
+      trimmed.pop();
+    }
+    await sendMessage(trimmed);
+  }
+
+  async function deleteChat(id: string) {
+    await fetch(`/api/delete?id=${id}`, { method: "DELETE" });
+
+    if (activeChatId === id) {
+      setActiveChatId(null);
+      setMessages([]);
+    }
+
     loadHistory();
   }
 
+  async function renameChat(id: string, currentTitle: string) {
+    const newTitle = window.prompt("Rename chat", currentTitle || "New Chat");
+    if (!newTitle?.trim()) return;
+
+    await fetch("/api/rename", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        id,
+        title: newTitle.trim()
+      })
+    });
+
+    loadHistory();
+  }
+
+  function newChat() {
+    setMessages([]);
+    setActiveChatId(null);
+  }
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Copied");
+    } catch {
+      alert("Copy failed");
+    }
+  }
+
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <div
-        style={{
-          width: 280,
-          borderRight: "1px solid #ddd",
-          padding: 12,
-          overflowY: "auto"
-        }}
-      >
-        <button
+    <div
+      style={{
+        display: "flex",
+        height: "100vh",
+        background: "#0f172a",
+        color: "white",
+        fontFamily: "Arial, sans-serif"
+      }}
+    >
+      {sidebarOpen && (
+        <div
           style={{
-            width: "100%",
-            marginBottom: 12,
-            padding: 10,
-            borderRadius: 8
+            width: 300,
+            borderRight: "1px solid #1f2937",
+            padding: 12,
+            overflowY: "auto",
+            background: "#020617",
+            color: "white"
           }}
-          onClick={() => setMessages([])}
         >
-          + New Chat
-        </button>
-
-        <h3 style={{ marginTop: 0 }}>History</h3>
-
-        {history.length === 0 && (
-          <div style={{ fontSize: 13, color: "#666" }}>No history yet.</div>
-        )}
-
-        {history.map((h) => (
-          <div
-            key={h.id}
+          <button
             style={{
-              border: "1px solid #ddd",
-              padding: 8,
-              marginBottom: 8,
-              borderRadius: 8
+              width: "100%",
+              marginBottom: 12,
+              padding: 10,
+              borderRadius: 8,
+              background: "#1e293b",
+              color: "white",
+              border: "1px solid #334155"
             }}
+            onClick={newChat}
           >
-            <div style={{ fontSize: 12, marginBottom: 6 }}>
-              <strong>{h.role}:</strong> {h.content?.slice(0, 60) || "..."}
-            </div>
+            + New Chat
+          </button>
 
-            <button
-              style={{ fontSize: 11, padding: "4px 8px" }}
-              onClick={() => deleteHistoryItem(h.id)}
+          <h3 style={{ marginTop: 0 }}>Chats</h3>
+
+          {history.length === 0 && (
+            <div style={{ fontSize: 13, color: "#9ca3af" }}>No chats yet.</div>
+          )}
+
+          {history.map((h) => (
+            <div
+              key={h.id}
+              style={{
+                border: "1px solid #334155",
+                padding: 8,
+                marginBottom: 8,
+                borderRadius: 8,
+                background: activeChatId === h.id ? "#1e293b" : "#0f172a"
+              }}
             >
-              Delete
-            </button>
-          </div>
-        ))}
-      </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  marginBottom: 8,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  color: "white"
+                }}
+                onClick={() => loadChat(h.id)}
+              >
+                {h.title || "New Chat"}
+              </div>
+
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  style={{
+                    fontSize: 11,
+                    padding: "4px 8px",
+                    background: "#1e293b",
+                    color: "white",
+                    border: "1px solid #334155",
+                    borderRadius: 6
+                  }}
+                  onClick={() => renameChat(h.id, h.title)}
+                >
+                  Rename
+                </button>
+
+                <button
+                  style={{
+                    fontSize: 11,
+                    padding: "4px 8px",
+                    background: "#1e293b",
+                    color: "white",
+                    border: "1px solid #334155",
+                    borderRadius: 6
+                  }}
+                  onClick={() => deleteChat(h.id)}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ flex: 1, padding: 20 }}>
         <div
@@ -146,11 +264,33 @@ export default function Home() {
           }}
         >
           <div>
-            <h1 style={{ margin: 0 }}>Nexa AI</h1>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              style={{
+                marginRight: 12,
+                background: "#1e293b",
+                color: "white",
+                border: "1px solid #334155",
+                borderRadius: 6,
+                padding: "6px 10px"
+              }}
+            >
+              {sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
+            </button>
+
+            <h1 style={{ margin: "10px 0 0 0", color: "white" }}>Nexa AI</h1>
+
             <select
               value={mode}
               onChange={(e) => setMode(e.target.value)}
-              style={{ marginTop: 10 }}
+              style={{
+                marginTop: 10,
+                background: "#020617",
+                color: "white",
+                border: "1px solid #334155",
+                padding: 8,
+                borderRadius: 6
+              }}
             >
               <option value="general">Chat</option>
               <option value="image">Image</option>
@@ -158,24 +298,43 @@ export default function Home() {
           </div>
 
           <div>
-            <a href="/login" style={{ marginRight: 12 }}>
+            <a href="/login" style={{ marginRight: 12, color: "white" }}>
               Login
             </a>
-            <a href="/signup">Sign Up</a>
+            <a href="/signup" style={{ marginRight: 12, color: "white" }}>
+              Sign Up
+            </a>
+            <button
+              onClick={async () => {
+                await fetch("/api/logout", { method: "POST" });
+                window.location.reload();
+              }}
+              style={{
+                background: "#1e293b",
+                color: "white",
+                border: "1px solid #334155",
+                borderRadius: 6,
+                padding: "6px 10px"
+              }}
+            >
+              Logout
+            </button>
           </div>
         </div>
 
         <div
           style={{
-            border: "1px solid #ccc",
+            border: "1px solid #1f2937",
             padding: 16,
             minHeight: 420,
             borderRadius: 8,
-            marginBottom: 12
+            marginBottom: 12,
+            background: "#020617",
+            color: "white"
           }}
         >
           {messages.length === 0 && (
-            <div style={{ color: "#666" }}>Start a new chat.</div>
+            <div style={{ color: "#9ca3af" }}>Start a new chat.</div>
           )}
 
           {messages.map((m, i) => {
@@ -184,10 +343,10 @@ export default function Home() {
               content.startsWith("http") || content.startsWith("data:image");
 
             return (
-              <div key={i} style={{ marginBottom: 10 }}>
+              <div key={i} style={{ marginBottom: 16 }}>
                 <strong>{m.role === "user" ? "You" : "Nexa AI"}:</strong>
 
-                <div style={{ marginTop: 5 }}>
+                <div style={{ marginTop: 6 }}>
                   {isImage ? (
                     <div>
                       <img
@@ -195,43 +354,103 @@ export default function Home() {
                         alt="Generated"
                         style={{ maxWidth: "100%", borderRadius: 8 }}
                       />
-                      <button
-                        style={{
-                          marginTop: 8,
-                          padding: "6px 10px",
-                          fontSize: 12,
-                          borderRadius: 6,
-                          cursor: "pointer"
-                        }}
-                        onClick={() => {
-                          const link = document.createElement("a");
-                          link.href = content;
-                          link.download = "nexa-image.png";
-                          link.click();
-                        }}
-                      >
-                        Download
-                      </button>
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          style={{
+                            padding: "6px 10px",
+                            fontSize: 12,
+                            borderRadius: 6,
+                            cursor: "pointer",
+                            background: "#1e293b",
+                            color: "white",
+                            border: "1px solid #334155"
+                          }}
+                          onClick={() => {
+                            const link = document.createElement("a");
+                            link.href = content;
+                            link.download = "nexa-image.png";
+                            link.click();
+                          }}
+                        >
+                          Download
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    content
+                    <div>
+                      <div style={{ color: "white" }}>{content}</div>
+
+                      {m.role === "assistant" && (
+                        <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                          <button
+                            style={{
+                              fontSize: 12,
+                              padding: "4px 8px",
+                              background: "#1e293b",
+                              color: "white",
+                              border: "1px solid #334155",
+                              borderRadius: 6
+                            }}
+                            onClick={() => copyText(content)}
+                          >
+                            Copy
+                          </button>
+
+                          {i === messages.length - 1 && (
+                            <button
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 8px",
+                                background: "#1e293b",
+                                color: "white",
+                                border: "1px solid #334155",
+                                borderRadius: 6
+                              }}
+                              onClick={regenerateLastReply}
+                            >
+                              Regenerate
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
             );
           })}
 
-          {loading && <div>Thinking...</div>}
+          {loading && <div style={{ color: "#9ca3af" }}>Thinking...</div>}
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            style={{ flex: 1, padding: 12, borderRadius: 8, border: "1px solid #ccc" }}
-            placeholder={mode === "image" ? "Describe the image you want" : "Type your message"}
+            style={{
+              flex: 1,
+              padding: 12,
+              borderRadius: 8,
+              border: "1px solid #1f2937",
+              background: "#020617",
+              color: "white"
+            }}
+            placeholder={
+              mode === "image"
+                ? "Describe the image you want"
+                : "Type your message"
+            }
           />
-          <button onClick={sendMessage} style={{ padding: "12px 18px", borderRadius: 8 }}>
+          <button
+            onClick={() => sendMessage()}
+            style={{
+              padding: "12px 18px",
+              borderRadius: 8,
+              background: "#1e293b",
+              color: "white",
+              border: "1px solid #334155"
+            }}
+          >
             Send
           </button>
         </div>

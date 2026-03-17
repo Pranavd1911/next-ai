@@ -17,10 +17,7 @@ export async function DELETE(req: Request) {
     );
   }
 
-  const { error } = await supabase
-    .from("messages")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("chats").delete().eq("id", id);
 
   if (error) {
     return NextResponse.json(

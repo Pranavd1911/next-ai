@@ -9,9 +9,9 @@ const openaiKey = process.env.OPENAI_API_KEY!;
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
 function getChatLimit(plan: string, isGuest: boolean) {
-  if (isGuest) return 5;
-  if (plan === "pro") return 300;
-  return 30;
+  if (isGuest) return 50;
+  if (plan === "pro") return 1000;
+  return 200;
 }
 
 export async function POST(req: Request) {
@@ -28,14 +28,15 @@ export async function POST(req: Request) {
       messages,
       mode = "general",
       userId = null,
-      guestId = null
+      guestId = null,
+      chatId = null
     } = body;
 
     const isGuest = !userId;
 
     if (isGuest && !guestId) {
       return NextResponse.json(
-        { error: "Missing guestId for guest usage tracking." },
+        { error: "Missing guestId." },
         { status: 400 }
       );
     }
@@ -43,18 +44,11 @@ export async function POST(req: Request) {
     let plan = "free";
 
     if (!isGuest) {
-      const { data: planRow, error: planError } = await supabaseAdmin
+      const { data: planRow } = await supabaseAdmin
         .from("user_plans")
         .select("plan")
         .eq("user_id", userId)
         .maybeSingle();
-
-      if (planError) {
-        return NextResponse.json(
-          { error: `Failed to fetch user plan: ${planError.message}` },
-          { status: 500 }
-        );
-      }
 
       plan = planRow?.plan || "free";
     }
@@ -75,7 +69,7 @@ export async function POST(req: Request) {
 
     if (usageError) {
       return NextResponse.json(
-        { error: `Failed to read usage logs: ${usageError.message}` },
+        { error: usageError.message },
         { status: 500 }
       );
     }
@@ -89,9 +83,36 @@ export async function POST(req: Request) {
 
     if (usedToday >= limit) {
       return NextResponse.json(
-        { error: `Daily chat limit reached for ${isGuest ? "guest" : plan} plan.` },
+        { error: `Daily chat limit reached.` },
         { status: 403 }
       );
+    }
+
+    let activeChatId = chatId;
+
+    if (!activeChatId) {
+      const firstUserMessage =
+        Array.isArray(messages) && messages.length > 0
+          ? messages.find((m: any) => m.role === "user")?.content || "New Chat"
+          : "New Chat";
+
+      const { data: newChat, error: chatError } = await supabaseAdmin
+        .from("chats")
+        .insert({
+          user_id: userId || guestId,
+          title: String(firstUserMessage).slice(0, 50)
+        })
+        .select()
+        .single();
+
+      if (chatError || !newChat) {
+        return NextResponse.json(
+          { error: chatError?.message || "Failed to create chat." },
+          { status: 500 }
+        );
+      }
+
+      activeChatId = newChat.id;
     }
 
     const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -122,37 +143,32 @@ export async function POST(req: Request) {
     const assistantReply =
       openaiData?.choices?.[0]?.message?.content || "No response received.";
 
+    const latestUserMessage =
+      messages?.[messages.length - 1]?.content || "";
+
     await supabaseAdmin.from("messages").insert([
       {
-        chat_id: guestId || userId || "guest",
+        chat_id: activeChatId,
         role: "user",
-        content: messages?.[messages.length - 1]?.content || ""
+        content: latestUserMessage
       },
       {
-        chat_id: guestId || userId || "guest",
+        chat_id: activeChatId,
         role: "assistant",
         content: assistantReply
       }
     ]);
 
-    const { error: insertUsageError } = await supabaseAdmin
-      .from("usage_logs")
-      .insert({
-        user_id: isGuest ? null : userId,
-        guest_id: isGuest ? guestId : null,
-        feature: "chat",
-        count: 1
-      });
-
-    if (insertUsageError) {
-      return NextResponse.json(
-        { error: `Failed to store usage log: ${insertUsageError.message}` },
-        { status: 500 }
-      );
-    }
+    await supabaseAdmin.from("usage_logs").insert({
+      user_id: isGuest ? null : userId,
+      guest_id: isGuest ? guestId : null,
+      feature: "chat",
+      count: 1
+    });
 
     return NextResponse.json({
       reply: assistantReply,
+      chatId: activeChatId,
       usage: {
         usedToday: usedToday + 1,
         limit

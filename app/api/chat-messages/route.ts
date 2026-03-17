@@ -8,19 +8,17 @@ const supabase = createClient(
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const userId = searchParams.get("userId");
-  const guestId = searchParams.get("guestId");
-  const ownerId = userId || guestId;
+  const chatId = searchParams.get("chatId");
 
-  if (!ownerId) {
+  if (!chatId) {
     return NextResponse.json([]);
   }
 
   const { data, error } = await supabase
-    .from("chats")
+    .from("messages")
     .select("*")
-    .eq("user_id", ownerId)
-    .order("created_at", { ascending: false });
+    .eq("chat_id", chatId)
+    .order("created_at", { ascending: true });
 
   if (error) {
     return NextResponse.json(
