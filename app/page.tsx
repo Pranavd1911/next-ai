@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { getGuestId } from "@/lib/guest";
 
 type Msg = {
@@ -13,6 +14,10 @@ type ChatItem = {
   title: string;
 };
 
+type Segment =
+  | { type: "markdown"; content: string }
+  | { type: "code"; content: string };
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -23,7 +28,6 @@ export default function Home() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
-
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
 
   async function loadHistory() {
@@ -70,7 +74,7 @@ export default function Home() {
         { role: "assistant", content: current }
       ]);
 
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 18));
     }
   }
 
@@ -105,7 +109,8 @@ export default function Home() {
       });
 
       const data = await res.json();
-      const reply = mode === "image" ? data.url : data.reply || data.error || "...";
+      const reply =
+        mode === "image" ? data.url : data.reply || data.error || "...";
 
       if (mode === "image") {
         setMessages([
@@ -184,20 +189,110 @@ export default function Home() {
     }
   }
 
+  function cleanMessageContent(content: string) {
+    return content.replace(/\nCopy\s*\n/g, "\n");
+  }
+
+  function isLikelyCodeLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+
+    return (
+      trimmed.startsWith("def ") ||
+      trimmed.startsWith("class ") ||
+      trimmed.startsWith("import ") ||
+      trimmed.startsWith("from ") ||
+      trimmed.startsWith("print(") ||
+      trimmed.startsWith("return ") ||
+      trimmed.startsWith("for ") ||
+      trimmed.startsWith("while ") ||
+      trimmed.startsWith("if ") ||
+      trimmed.startsWith("elif ") ||
+      trimmed === "else:" ||
+      trimmed.startsWith("try:") ||
+      trimmed.startsWith("except") ||
+      trimmed.startsWith("finally:") ||
+      trimmed.startsWith("with ") ||
+      trimmed.startsWith("let ") ||
+      trimmed.startsWith("const ") ||
+      trimmed.startsWith("function ") ||
+      trimmed.startsWith("public ") ||
+      trimmed.startsWith("private ") ||
+      trimmed.startsWith("console.log(") ||
+      trimmed.includes(" = ") ||
+      trimmed.includes(" += ") ||
+      trimmed.includes(" -= ") ||
+      trimmed.includes(" *= ") ||
+      trimmed.includes(" /= ") ||
+      trimmed.includes("==") ||
+      trimmed.includes("!=") ||
+      trimmed.includes("=>") ||
+      trimmed.includes("();") ||
+      trimmed.endsWith("{") ||
+      trimmed.endsWith("}") ||
+      /^[a-zA-Z_][a-zA-Z0-9_]*\(/.test(trimmed)
+    );
+  }
+
+  function splitContentIntoSegments(content: string): Segment[] {
+    const cleaned = cleanMessageContent(content);
+
+    if (cleaned.includes("```")) {
+      return [{ type: "markdown", content: cleaned }];
+    }
+
+    const lines = cleaned.split("\n");
+    const segments: Segment[] = [];
+
+    let markdownBuffer: string[] = [];
+    let codeBuffer: string[] = [];
+
+    function flushMarkdown() {
+      const text = markdownBuffer.join("\n").trim();
+      if (text) segments.push({ type: "markdown", content: text });
+      markdownBuffer = [];
+    }
+
+    function flushCode() {
+      const text = codeBuffer.join("\n").trim();
+      if (text) segments.push({ type: "code", content: text });
+      codeBuffer = [];
+    }
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (trimmed === "Copy") continue;
+
+      if (isLikelyCodeLine(line)) {
+        flushMarkdown();
+        codeBuffer.push(line);
+      } else {
+        flushCode();
+        markdownBuffer.push(line);
+      }
+    }
+
+    flushMarkdown();
+    flushCode();
+
+    return segments.filter((s) => s.content.length > 0);
+  }
+
   const primaryButtonStyle: React.CSSProperties = {
-    background: "#1e293b",
+    background: "#2b3445",
     color: "white",
-    border: "1px solid #334155",
-    borderRadius: 8,
+    border: "1px solid #3b465a",
+    borderRadius: 10,
     padding: "8px 12px",
     cursor: "pointer"
   };
 
   const smallButtonStyle: React.CSSProperties = {
-    background: "#1e293b",
+    background: "#2b3445",
     color: "white",
-    border: "1px solid #334155",
-    borderRadius: 6,
+    border: "1px solid #3b465a",
+    borderRadius: 8,
     padding: "4px 8px",
     cursor: "pointer",
     fontSize: 12
@@ -208,7 +303,7 @@ export default function Home() {
       style={{
         display: "flex",
         height: "100vh",
-        background: "#0f172a",
+        background: "#212121",
         color: "white",
         fontFamily: "Arial, sans-serif"
       }}
@@ -216,48 +311,61 @@ export default function Home() {
       {sidebarOpen && (
         <div
           style={{
-            width: 300,
-            borderRight: "1px solid #1f2937",
+            width: 280,
+            background: "#171717",
+            borderRight: "1px solid #2f2f2f",
             padding: 12,
-            background: "#020617",
-            overflowY: "auto"
+            overflowY: "auto",
+            flexShrink: 0
           }}
         >
           <button
             style={{
               ...primaryButtonStyle,
               width: "100%",
-              marginBottom: 12
+              marginBottom: 14,
+              background: "#2a2a2a",
+              border: "1px solid #3a3a3a"
             }}
             onClick={newChat}
           >
             + New Chat
           </button>
 
-          <h3 style={{ marginTop: 0, marginBottom: 12 }}>Chats</h3>
+          <div
+            style={{
+              fontSize: 13,
+              color: "#bdbdbd",
+              marginBottom: 10,
+              fontWeight: 700
+            }}
+          >
+            Chats
+          </div>
 
           {history.length === 0 && (
-            <div style={{ color: "#cbd5e1", fontSize: 14 }}>No chats yet.</div>
+            <div style={{ color: "#9ca3af", fontSize: 14 }}>No chats yet.</div>
           )}
 
           {history.map((h) => (
             <div
               key={h.id}
               style={{
-                border: "1px solid #334155",
                 padding: 10,
                 marginBottom: 10,
-                borderRadius: 8,
-                background: activeChatId === h.id ? "#1e293b" : "#0f172a"
+                borderRadius: 10,
+                background: activeChatId === h.id ? "#2a2a2a" : "transparent",
+                border: "1px solid #2f2f2f"
               }}
             >
               <div
                 style={{
                   cursor: "pointer",
                   marginBottom: 8,
-                  color: "#f8fafc",
+                  color: "#f5f5f5",
                   fontWeight: 600,
-                  wordBreak: "break-word"
+                  wordBreak: "break-word",
+                  fontSize: 14
                 }}
                 onClick={() => loadChat(h.id)}
               >
@@ -283,48 +391,55 @@ export default function Home() {
         </div>
       )}
 
-      <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0
+        }}
+      >
         <div
           style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid #2f2f2f",
+            background: "#212121",
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "flex-start",
-            marginBottom: 20
+            alignItems: "center"
           }}
         >
-          <div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <button
-              style={{ ...primaryButtonStyle, marginBottom: 12 }}
+              style={primaryButtonStyle}
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               {sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
             </button>
 
-            <h1 style={{ margin: 0, color: "#f8fafc" }}>Nexa AI</h1>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>Nexa AI</div>
 
-            <div style={{ marginTop: 12 }}>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                style={{
-                  background: "#020617",
-                  color: "white",
-                  border: "1px solid #334155",
-                  borderRadius: 8,
-                  padding: "8px 10px"
-                }}
-              >
-                <option value="general">Chat</option>
-                <option value="image">Image</option>
-              </select>
-            </div>
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              style={{
+                background: "#2a2a2a",
+                color: "white",
+                border: "1px solid #3a3a3a",
+                borderRadius: 8,
+                padding: "8px 10px"
+              }}
+            >
+              <option value="general">Chat</option>
+              <option value="image">Image</option>
+            </select>
           </div>
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <a href="/login" style={{ color: "#e2e8f0" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <a href="/login" style={{ color: "#d1d5db", textDecoration: "none" }}>
               Login
             </a>
-            <a href="/signup" style={{ color: "#e2e8f0" }}>
+            <a href="/signup" style={{ color: "#d1d5db", textDecoration: "none" }}>
               Sign Up
             </a>
             <button
@@ -341,140 +456,297 @@ export default function Home() {
 
         <div
           style={{
-            marginTop: 20,
-            border: "1px solid #334155",
-            borderRadius: 12,
-            background: "#020617",
-            padding: 16,
-            minHeight: 420
+            flex: 1,
+            overflowY: "auto",
+            padding: "24px 0"
           }}
         >
-          {messages.length === 0 && (
-            <div style={{ color: "#cbd5e1" }}>Start a new chat.</div>
-          )}
+          {messages.length === 0 ? (
+            <div
+              style={{
+                maxWidth: 800,
+                margin: "80px auto 0 auto",
+                textAlign: "center",
+                color: "#cbd5e1",
+                padding: "0 20px"
+              }}
+            >
+              <div style={{ fontSize: 34, fontWeight: 700, marginBottom: 12 }}>
+                How can I help you today?
+              </div>
+              <div style={{ color: "#9ca3af", fontSize: 16 }}>
+                Ask anything, generate images, or continue an earlier chat.
+              </div>
+            </div>
+          ) : (
+            <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 16px" }}>
+              {messages.map((m, i) => {
+                const isImage =
+                  typeof m.content === "string" &&
+                  (m.content.startsWith("http") ||
+                    m.content.startsWith("data:image"));
 
-          {messages.map((m, i) => {
-            const isImage =
-              typeof m.content === "string" &&
-              (m.content.startsWith("http") ||
-                m.content.startsWith("data:image"));
+                const segments =
+                  !isImage && typeof m.content === "string"
+                    ? splitContentIntoSegments(m.content)
+                    : [];
 
-            return (
-              <div
-                key={i}
-                style={{
-                  marginBottom: 18,
-                  paddingBottom: 12,
-                  borderBottom:
-                    i !== messages.length - 1 ? "1px solid #1e293b" : "none"
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: 700,
-                    color: m.role === "user" ? "#93c5fd" : "#f8fafc",
-                    marginBottom: 6
-                  }}
-                >
-                  {m.role === "user" ? "You" : "AI"}
-                </div>
+                const isUser = m.role === "user";
 
-                {isImage ? (
-                  <div>
-                    <img
-                      src={m.content}
-                      alt="Generated"
-                      style={{
-                        maxWidth: "320px",
-                        width: "100%",
-                        borderRadius: 10,
-                        display: "block"
-                      }}
-                    />
-                    <button
-                      style={{ ...smallButtonStyle, marginTop: 10 }}
-                      onClick={() => {
-                        const a = document.createElement("a");
-                        a.href = m.content;
-                        a.download = "image.png";
-                        a.click();
-                      }}
-                    >
-                      Download
-                    </button>
-                  </div>
-                ) : (
+                return (
                   <div
+                    key={i}
                     style={{
-                      color: "#e5e7eb",
-                      lineHeight: 1.6,
-                      whiteSpace: "pre-wrap"
+                      display: "flex",
+                      justifyContent: isUser ? "flex-end" : "flex-start",
+                      marginBottom: 22
                     }}
                   >
-                    {m.content}
-                    {i === messages.length - 1 && loading && (
-                      <span style={{ marginLeft: 4 }}>|</span>
-                    )}
-                  </div>
-                )}
-
-                {m.role === "assistant" && !isImage && (
-                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                    <button
-                      style={smallButtonStyle}
-                      onClick={() => copyText(m.content)}
+                    <div
+                      style={{
+                        maxWidth: isUser ? "75%" : "85%",
+                        background: isUser ? "#2f6fed" : "#2a2a2a",
+                        color: "white",
+                        borderRadius: 18,
+                        padding: "14px 16px",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.25)"
+                      }}
                     >
-                      Copy
-                    </button>
-                    {i === messages.length - 1 && (
-                      <button
-                        style={smallButtonStyle}
-                        onClick={regenerateLastReply}
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          color: isUser ? "#dbeafe" : "#f8fafc",
+                          marginBottom: 8,
+                          fontSize: 13
+                        }}
                       >
-                        Regenerate
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                        {isUser ? "You" : "AI"}
+                      </div>
 
-          {loading && <p style={{ color: "#cbd5e1" }}>Thinking...</p>}
-          <div ref={bottomRef} />
+                      {isImage ? (
+                        <div>
+                          <img
+                            src={m.content}
+                            alt="Generated"
+                            style={{
+                              maxWidth: "360px",
+                              width: "100%",
+                              borderRadius: 12,
+                              display: "block"
+                            }}
+                          />
+                          <button
+                            style={{ ...smallButtonStyle, marginTop: 10 }}
+                            onClick={() => {
+                              const a = document.createElement("a");
+                              a.href = m.content;
+                              a.download = "image.png";
+                              a.click();
+                            }}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ color: "#f3f4f6", lineHeight: 1.65 }}>
+                          {segments.map((segment, index) => {
+                            if (segment.type === "code") {
+                              return (
+                                <div
+                                  key={index}
+                                  style={{
+                                    position: "relative",
+                                    marginTop: 8,
+                                    marginBottom: 8
+                                  }}
+                                >
+                                  <button
+                                    onClick={() => copyText(segment.content)}
+                                    style={{
+                                      position: "absolute",
+                                      right: 8,
+                                      top: 8,
+                                      background: "#334155",
+                                      color: "white",
+                                      border: "none",
+                                      padding: "4px 8px",
+                                      borderRadius: 6,
+                                      cursor: "pointer",
+                                      fontSize: 12
+                                    }}
+                                  >
+                                    Copy
+                                  </button>
+
+                                  <pre
+                                    style={{
+                                      background: "#111827",
+                                      padding: 14,
+                                      borderRadius: 12,
+                                      overflowX: "auto",
+                                      border: "1px solid #374151",
+                                      margin: 0,
+                                      whiteSpace: "pre-wrap"
+                                    }}
+                                  >
+                                    <code>{segment.content}</code>
+                                  </pre>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <ReactMarkdown
+                                key={index}
+                                components={{
+                                  p: ({ children }) => (
+                                    <div style={{ marginBottom: 10 }}>{children}</div>
+                                  ),
+                                  ul: ({ children }) => (
+                                    <ul style={{ paddingLeft: 20, marginBottom: 10 }}>
+                                      {children}
+                                    </ul>
+                                  ),
+                                  ol: ({ children }) => (
+                                    <ol style={{ paddingLeft: 20, marginBottom: 10 }}>
+                                      {children}
+                                    </ol>
+                                  ),
+                                  li: ({ children }) => (
+                                    <li style={{ marginBottom: 4 }}>{children}</li>
+                                  ),
+                                  h1: ({ children }) => (
+                                    <h1 style={{ margin: "12px 0 8px 0", fontSize: 28 }}>
+                                      {children}
+                                    </h1>
+                                  ),
+                                  h2: ({ children }) => (
+                                    <h2 style={{ margin: "12px 0 8px 0", fontSize: 24 }}>
+                                      {children}
+                                    </h2>
+                                  ),
+                                  h3: ({ children }) => (
+                                    <h3 style={{ margin: "12px 0 8px 0", fontSize: 20 }}>
+                                      {children}
+                                    </h3>
+                                  ),
+                                  code(props: any) {
+                                    const { inline, children } = props;
+                                    const codeText = String(children).replace(/\n$/, "");
+
+                                    if (inline) {
+                                      return (
+                                        <code
+                                          style={{
+                                            background: "#374151",
+                                            padding: "2px 6px",
+                                            borderRadius: 6
+                                          }}
+                                        >
+                                          {children}
+                                        </code>
+                                      );
+                                    }
+
+                                    return (
+                                      <pre
+                                        style={{
+                                          background: "#111827",
+                                          padding: 14,
+                                          borderRadius: 12,
+                                          overflowX: "auto",
+                                          border: "1px solid #374151",
+                                          margin: 0
+                                        }}
+                                      >
+                                        <code>{codeText}</code>
+                                      </pre>
+                                    );
+                                  }
+                                }}
+                              >
+                                {segment.content}
+                              </ReactMarkdown>
+                            );
+                          })}
+
+                          {i === messages.length - 1 && loading && !isUser && (
+                            <span style={{ marginLeft: 4 }}>|</span>
+                          )}
+                        </div>
+                      )}
+
+                      {!isUser && !isImage && (
+                        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                          <button
+                            style={smallButtonStyle}
+                            onClick={() => copyText(m.content)}
+                          >
+                            Copy
+                          </button>
+                          {i === messages.length - 1 && (
+                            <button
+                              style={smallButtonStyle}
+                              onClick={regenerateLastReply}
+                            >
+                              Regenerate
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {loading && (
+                <div style={{ color: "#9ca3af", marginTop: 8 }}>Thinking...</div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+          )}
         </div>
 
-        <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !loading) {
-                e.preventDefault();
-                sendMessage();
+        <div
+          style={{
+            borderTop: "1px solid #2f2f2f",
+            background: "#212121",
+            padding: "16px 20px 20px 20px"
+          }}
+        >
+          <div style={{ maxWidth: 860, margin: "0 auto", display: "flex", gap: 12 }}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !loading) {
+                  e.preventDefault();
+                  sendMessage();
+                }
+              }}
+              rows={1}
+              style={{
+                flex: 1,
+                padding: 14,
+                background: "#2a2a2a",
+                color: "white",
+                border: "1px solid #3a3a3a",
+                borderRadius: 16,
+                outline: "none",
+                resize: "none",
+                minHeight: 52
+              }}
+              placeholder={
+                mode === "image"
+                  ? "Describe the image you want"
+                  : "Message Nexa AI"
               }
-            }}
-            rows={1}
-            style={{
-              flex: 1,
-              padding: 12,
-              background: "#020617",
-              color: "white",
-              border: "1px solid #334155",
-              borderRadius: 10,
-              outline: "none",
-              resize: "none"
-            }}
-            placeholder={
-              mode === "image"
-                ? "Describe the image you want"
-                : "Type your message"
-            }
-          />
+            />
 
-          <button style={primaryButtonStyle} onClick={() => sendMessage()}>
-            Send
-          </button>
+            <button style={primaryButtonStyle} onClick={() => sendMessage()}>
+              Send
+            </button>
+          </div>
         </div>
       </div>
     </div>
