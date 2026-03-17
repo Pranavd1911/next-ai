@@ -105,9 +105,11 @@ export default function Home() {
   async function regenerateLastReply() {
     const trimmed = [...messages];
     if (!trimmed.length) return;
+
     if (trimmed[trimmed.length - 1]?.role === "assistant") {
       trimmed.pop();
     }
+
     await sendMessage(trimmed);
   }
 
@@ -154,6 +156,25 @@ export default function Home() {
     }
   }
 
+  const primaryButtonStyle: React.CSSProperties = {
+    background: "#1e293b",
+    color: "white",
+    border: "1px solid #334155",
+    borderRadius: 8,
+    padding: "8px 12px",
+    cursor: "pointer"
+  };
+
+  const smallButtonStyle: React.CSSProperties = {
+    background: "#1e293b",
+    color: "white",
+    border: "1px solid #334155",
+    borderRadius: 6,
+    padding: "4px 8px",
+    cursor: "pointer",
+    fontSize: 12
+  };
+
   return (
     <div
       style={{
@@ -170,30 +191,25 @@ export default function Home() {
             width: 300,
             borderRight: "1px solid #1f2937",
             padding: 12,
-            overflowY: "auto",
             background: "#020617",
-            color: "white"
+            overflowY: "auto"
           }}
         >
           <button
             style={{
+              ...primaryButtonStyle,
               width: "100%",
-              marginBottom: 12,
-              padding: 10,
-              borderRadius: 8,
-              background: "#1e293b",
-              color: "white",
-              border: "1px solid #334155"
+              marginBottom: 12
             }}
             onClick={newChat}
           >
             + New Chat
           </button>
 
-          <h3 style={{ marginTop: 0 }}>Chats</h3>
+          <h3 style={{ marginTop: 0, marginBottom: 12 }}>Chats</h3>
 
           {history.length === 0 && (
-            <div style={{ fontSize: 13, color: "#9ca3af" }}>No chats yet.</div>
+            <div style={{ color: "#cbd5e1", fontSize: 14 }}>No chats yet.</div>
           )}
 
           {history.map((h) => (
@@ -201,49 +217,34 @@ export default function Home() {
               key={h.id}
               style={{
                 border: "1px solid #334155",
-                padding: 8,
-                marginBottom: 8,
+                padding: 10,
+                marginBottom: 10,
                 borderRadius: 8,
                 background: activeChatId === h.id ? "#1e293b" : "#0f172a"
               }}
             >
               <div
                 style={{
-                  fontSize: 13,
-                  marginBottom: 8,
                   cursor: "pointer",
+                  marginBottom: 8,
+                  color: "#f8fafc",
                   fontWeight: 600,
-                  color: "white"
+                  wordBreak: "break-word"
                 }}
                 onClick={() => loadChat(h.id)}
               >
                 {h.title || "New Chat"}
               </div>
 
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 8 }}>
                 <button
-                  style={{
-                    fontSize: 11,
-                    padding: "4px 8px",
-                    background: "#1e293b",
-                    color: "white",
-                    border: "1px solid #334155",
-                    borderRadius: 6
-                  }}
+                  style={smallButtonStyle}
                   onClick={() => renameChat(h.id, h.title)}
                 >
                   Rename
                 </button>
-
                 <button
-                  style={{
-                    fontSize: 11,
-                    padding: "4px 8px",
-                    background: "#1e293b",
-                    color: "white",
-                    border: "1px solid #334155",
-                    borderRadius: 6
-                  }}
+                  style={smallButtonStyle}
                   onClick={() => deleteChat(h.id)}
                 >
                   Delete
@@ -254,67 +255,55 @@ export default function Home() {
         </div>
       )}
 
-      <div style={{ flex: 1, padding: 20 }}>
+      <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 16
+            alignItems: "flex-start",
+            marginBottom: 20
           }}
         >
           <div>
             <button
+              style={{ ...primaryButtonStyle, marginBottom: 12 }}
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              style={{
-                marginRight: 12,
-                background: "#1e293b",
-                color: "white",
-                border: "1px solid #334155",
-                borderRadius: 6,
-                padding: "6px 10px"
-              }}
             >
               {sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
             </button>
 
-            <h1 style={{ margin: "10px 0 0 0", color: "white" }}>Nexa AI</h1>
+            <h1 style={{ margin: 0, color: "#f8fafc" }}>Nexa AI</h1>
 
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-              style={{
-                marginTop: 10,
-                background: "#020617",
-                color: "white",
-                border: "1px solid #334155",
-                padding: 8,
-                borderRadius: 6
-              }}
-            >
-              <option value="general">Chat</option>
-              <option value="image">Image</option>
-            </select>
+            <div style={{ marginTop: 12 }}>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                style={{
+                  background: "#020617",
+                  color: "white",
+                  border: "1px solid #334155",
+                  borderRadius: 8,
+                  padding: "8px 10px"
+                }}
+              >
+                <option value="general">Chat</option>
+                <option value="image">Image</option>
+              </select>
+            </div>
           </div>
 
-          <div>
-            <a href="/login" style={{ marginRight: 12, color: "white" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <a href="/login" style={{ color: "#e2e8f0" }}>
               Login
             </a>
-            <a href="/signup" style={{ marginRight: 12, color: "white" }}>
+            <a href="/signup" style={{ color: "#e2e8f0" }}>
               Sign Up
             </a>
             <button
+              style={primaryButtonStyle}
               onClick={async () => {
                 await fetch("/api/logout", { method: "POST" });
                 window.location.reload();
-              }}
-              style={{
-                background: "#1e293b",
-                color: "white",
-                border: "1px solid #334155",
-                borderRadius: 6,
-                padding: "6px 10px"
               }}
             >
               Logout
@@ -324,116 +313,123 @@ export default function Home() {
 
         <div
           style={{
-            border: "1px solid #1f2937",
-            padding: 16,
-            minHeight: 420,
-            borderRadius: 8,
-            marginBottom: 12,
+            marginTop: 20,
+            border: "1px solid #334155",
+            borderRadius: 12,
             background: "#020617",
-            color: "white"
+            padding: 16,
+            minHeight: 420
           }}
         >
           {messages.length === 0 && (
-            <div style={{ color: "#9ca3af" }}>Start a new chat.</div>
+            <div style={{ color: "#cbd5e1" }}>Start a new chat.</div>
           )}
 
           {messages.map((m, i) => {
-            const content = typeof m.content === "string" ? m.content : "";
             const isImage =
-              content.startsWith("http") || content.startsWith("data:image");
+              typeof m.content === "string" &&
+              (m.content.startsWith("http") ||
+                m.content.startsWith("data:image"));
 
             return (
-              <div key={i} style={{ marginBottom: 16 }}>
-                <strong>{m.role === "user" ? "You" : "Nexa AI"}:</strong>
-
-                <div style={{ marginTop: 6 }}>
-                  {isImage ? (
-                    <div>
-                      <img
-                        src={content}
-                        alt="Generated"
-                        style={{ maxWidth: "100%", borderRadius: 8 }}
-                      />
-                      <div style={{ marginTop: 8 }}>
-                        <button
-                          style={{
-                            padding: "6px 10px",
-                            fontSize: 12,
-                            borderRadius: 6,
-                            cursor: "pointer",
-                            background: "#1e293b",
-                            color: "white",
-                            border: "1px solid #334155"
-                          }}
-                          onClick={() => {
-                            const link = document.createElement("a");
-                            link.href = content;
-                            link.download = "nexa-image.png";
-                            link.click();
-                          }}
-                        >
-                          Download
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <div style={{ color: "white" }}>{content}</div>
-
-                      {m.role === "assistant" && (
-                        <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                          <button
-                            style={{
-                              fontSize: 12,
-                              padding: "4px 8px",
-                              background: "#1e293b",
-                              color: "white",
-                              border: "1px solid #334155",
-                              borderRadius: 6
-                            }}
-                            onClick={() => copyText(content)}
-                          >
-                            Copy
-                          </button>
-
-                          {i === messages.length - 1 && (
-                            <button
-                              style={{
-                                fontSize: 12,
-                                padding: "4px 8px",
-                                background: "#1e293b",
-                                color: "white",
-                                border: "1px solid #334155",
-                                borderRadius: 6
-                              }}
-                              onClick={regenerateLastReply}
-                            >
-                              Regenerate
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+              <div
+                key={i}
+                style={{
+                  marginBottom: 18,
+                  paddingBottom: 12,
+                  borderBottom:
+                    i !== messages.length - 1 ? "1px solid #1e293b" : "none"
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 700,
+                    color: m.role === "user" ? "#93c5fd" : "#f8fafc",
+                    marginBottom: 6
+                  }}
+                >
+                  {m.role === "user" ? "You" : "AI"}
                 </div>
+
+                {isImage ? (
+                  <div>
+                    <img
+                      src={m.content}
+                      alt="Generated"
+                      style={{
+                        maxWidth: "320px",
+                        width: "100%",
+                        borderRadius: 10,
+                        display: "block"
+                      }}
+                    />
+                    <button
+                      style={{ ...smallButtonStyle, marginTop: 10 }}
+                      onClick={() => {
+                        const a = document.createElement("a");
+                        a.href = m.content;
+                        a.download = "image.png";
+                        a.click();
+                      }}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      color: "#e5e7eb",
+                      lineHeight: 1.6,
+                      whiteSpace: "pre-wrap"
+                    }}
+                  >
+                    {m.content}
+                  </div>
+                )}
+
+                {m.role === "assistant" && !isImage && (
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button
+                      style={smallButtonStyle}
+                      onClick={() => copyText(m.content)}
+                    >
+                      Copy
+                    </button>
+                    {i === messages.length - 1 && (
+                      <button
+                        style={smallButtonStyle}
+                        onClick={regenerateLastReply}
+                      >
+                        Regenerate
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
 
-          {loading && <div style={{ color: "#9ca3af" }}>Thinking...</div>}
+          {loading && <p style={{ color: "#cbd5e1" }}>Thinking...</p>}
         </div>
 
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !loading) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
             style={{
               flex: 1,
               padding: 12,
-              borderRadius: 8,
-              border: "1px solid #1f2937",
               background: "#020617",
-              color: "white"
+              color: "white",
+              border: "1px solid #334155",
+              borderRadius: 10,
+              outline: "none"
             }}
             placeholder={
               mode === "image"
@@ -441,16 +437,8 @@ export default function Home() {
                 : "Type your message"
             }
           />
-          <button
-            onClick={() => sendMessage()}
-            style={{
-              padding: "12px 18px",
-              borderRadius: 8,
-              background: "#1e293b",
-              color: "white",
-              border: "1px solid #334155"
-            }}
-          >
+
+          <button style={primaryButtonStyle} onClick={() => sendMessage()}>
             Send
           </button>
         </div>
