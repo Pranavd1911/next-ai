@@ -50,6 +50,27 @@ export default function Home() {
     loadHistory();
   }, []);
 
+  async function animateAssistantReply(nextMessages: Msg[], fullReply: string) {
+    const words = fullReply.split(" ");
+    let current = "";
+
+    setMessages([
+      ...nextMessages,
+      { role: "assistant", content: "" }
+    ]);
+
+    for (let i = 0; i < words.length; i++) {
+      current += (i === 0 ? "" : " ") + words[i];
+
+      setMessages([
+        ...nextMessages,
+        { role: "assistant", content: current }
+      ]);
+
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
   async function sendMessage(customMessages?: Msg[]) {
     const nextMessages = customMessages
       ? customMessages
@@ -81,12 +102,16 @@ export default function Home() {
       });
 
       const data = await res.json();
-      const reply = mode === "image" ? data.url : data.reply;
+      const reply = mode === "image" ? data.url : data.reply || data.error || "...";
 
-      setMessages([
-        ...nextMessages,
-        { role: "assistant", content: reply || data.error || "..." }
-      ]);
+      if (mode === "image") {
+        setMessages([
+          ...nextMessages,
+          { role: "assistant", content: reply }
+        ]);
+      } else {
+        await animateAssistantReply(nextMessages, reply);
+      }
 
       if (data.chatId && !activeChatId) {
         setActiveChatId(data.chatId);

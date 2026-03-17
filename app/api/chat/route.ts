@@ -79,14 +79,7 @@ export async function POST(req: Request) {
       0
     );
 
-    const limit = getChatLimit(plan, isGuest);
-
-    if (usedToday >= limit) {
-      return NextResponse.json(
-        { error: `Daily chat limit reached.` },
-        { status: 403 }
-      );
-    }
+    // REMOVE LIMITS (ChatGPT style)
 
     let activeChatId = chatId;
 
