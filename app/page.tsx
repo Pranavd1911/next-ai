@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getGuestId } from "@/lib/guest";
 
 type Msg = {
@@ -21,6 +21,8 @@ export default function Home() {
   const [mode, setMode] = useState("general");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
 
@@ -50,14 +52,15 @@ export default function Home() {
     loadHistory();
   }, []);
 
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
   async function animateAssistantReply(nextMessages: Msg[], fullReply: string) {
     const words = fullReply.split(" ");
     let current = "";
 
-    setMessages([
-      ...nextMessages,
-      { role: "assistant", content: "" }
-    ]);
+    setMessages([...nextMessages, { role: "assistant", content: "" }]);
 
     for (let i = 0; i < words.length; i++) {
       current += (i === 0 ? "" : " ") + words[i];
@@ -409,6 +412,9 @@ export default function Home() {
                     }}
                   >
                     {m.content}
+                    {i === messages.length - 1 && loading && (
+                      <span style={{ marginLeft: 4 }}>|</span>
+                    )}
                   </div>
                 )}
 
@@ -435,18 +441,20 @@ export default function Home() {
           })}
 
           {loading && <p style={{ color: "#cbd5e1" }}>Thinking...</p>}
+          <div ref={bottomRef} />
         </div>
 
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-          <input
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !loading) {
+              if (e.key === "Enter" && !e.shiftKey && !loading) {
                 e.preventDefault();
                 sendMessage();
               }
             }}
+            rows={1}
             style={{
               flex: 1,
               padding: 12,
@@ -454,7 +462,8 @@ export default function Home() {
               color: "white",
               border: "1px solid #334155",
               borderRadius: 10,
-              outline: "none"
+              outline: "none",
+              resize: "none"
             }}
             placeholder={
               mode === "image"
