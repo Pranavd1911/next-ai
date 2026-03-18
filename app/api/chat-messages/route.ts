@@ -7,25 +7,62 @@ const supabase = createClient(
 );
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const chatId = searchParams.get("chatId");
+  try {
+    const { searchParams } = new URL(req.url);
+    const chatId = searchParams.get("chatId");
+    const userId = searchParams.get("userId");
+    const guestId = searchParams.get("guestId");
 
-  if (!chatId) {
-    return NextResponse.json([]);
-  }
+    const ownerId = userId || guestId;
 
-  const { data, error } = await supabase
-    .from("messages")
-    .select("*")
-    .eq("chat_id", chatId)
-    .order("created_at", { ascending: true });
+    if (!chatId || !ownerId) {
+      return NextResponse.json(
+        { error: "Missing chatId or owner id." },
+        { status: 400 }
+      );
+    }
 
-  if (error) {
+    const { data: chat, error: chatError } = await supabase
+      .from("chats")
+      .select("id, user_id")
+      .eq("id", chatId)
+      .single();
+
+    if (chatError || !chat) {
+      return NextResponse.json(
+        { error: "Chat not found." },
+        { status: 404 }
+      );
+    }
+
+    if (chat.user_id !== ownerId) {
+      return NextResponse.json(
+        { error: "Unauthorized chat access." },
+        { status: 403 }
+      );
+    }
+
+    const { data, error } = await supabase
+      .from("messages")
+      .select("role, content, created_at")
+      .eq("chat_id", chatId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(data || []);
+  } catch (error) {
     return NextResponse.json(
-      { error: error.message },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to load messages."
+      },
       { status: 500 }
     );
   }
-
-  return NextResponse.json(data || []);
 }

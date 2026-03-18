@@ -7,27 +7,38 @@ const supabase = createClient(
 );
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const userId = searchParams.get("userId");
-  const guestId = searchParams.get("guestId");
-  const ownerId = userId || guestId;
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get("userId");
+    const guestId = searchParams.get("guestId");
 
-  if (!ownerId) {
-    return NextResponse.json([]);
-  }
+    const ownerId = userId || guestId;
 
-  const { data, error } = await supabase
-    .from("chats")
-    .select("*")
-    .eq("user_id", ownerId)
-    .order("created_at", { ascending: false });
+    if (!ownerId) {
+      return NextResponse.json([]);
+    }
 
-  if (error) {
+    const { data, error } = await supabase
+      .from("chats")
+      .select("id, title, created_at")
+      .eq("user_id", ownerId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(data || []);
+  } catch (error) {
     return NextResponse.json(
-      { error: error.message },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to load history."
+      },
       { status: 500 }
     );
   }
-
-  return NextResponse.json(data || []);
 }

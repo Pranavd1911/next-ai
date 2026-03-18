@@ -1,87 +1,114 @@
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
-import { supabase } from "@/lib/supabase-browser";
+import { useEffect, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase-browser";
 
 export default function LoginPage() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setMessage("");
-    setError("");
+  useEffect(() => {
+    async function checkUser() {
+      const {
+        data: { user }
+      } = await supabaseBrowser.auth.getUser();
 
-    if (!email || !password) {
-      setError("Enter both email and password.");
-      return;
-    }
-
-    if (mode === "login") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setError(error.message);
-        return;
+      if (user) {
+        window.location.href = "/";
       }
-      window.location.href = "/";
-      return;
     }
 
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    checkUser();
+  }, []);
+
+  async function handleLogin(e: any) {
+    e.preventDefault();
+    setLoading(true);
+
+    const email = e.target.email.value;
+    const password = e.target.password.value;
+
+    const { error } = await supabaseBrowser.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    setLoading(false);
+
     if (error) {
-      setError(error.message);
-      return;
-    }
-
-    if (data.user && !data.session) {
-      setMessage("Account created. Check your email if confirmation is enabled in Supabase.");
+      alert(error.message);
     } else {
-      setMessage("Account created and signed in.");
       window.location.href = "/";
     }
   }
 
   return (
-    <main className="login-shell">
-      <div className="login-card stack">
-        <div>
-          <h1 style={{ margin: 0 }}>{mode === "login" ? "Login" : "Create account"}</h1>
-          <p className="muted small" style={{ marginTop: 8 }}>
-            For fastest testing, disable email confirmation in Supabase Auth or configure your auth email flow correctly.
-          </p>
-        </div>
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#212121",
+        color: "white"
+      }}
+    >
+      <form
+        onSubmit={handleLogin}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          width: 300
+        }}
+      >
+        <h2>Login</h2>
 
-        {message ? <div className="notice">{message}</div> : null}
-        {error ? <div className="error">{error}</div> : null}
+        <input
+          name="email"
+          placeholder="Email"
+          required
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            border: "1px solid #444",
+            background: "#2a2a2a",
+            color: "white"
+          }}
+        />
 
-        <form onSubmit={handleSubmit} className="stack">
-          <label className="field">
-            <span>Email</span>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-          </label>
+        <input
+          name="password"
+          type="password"
+          placeholder="Password"
+          required
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            border: "1px solid #444",
+            background: "#2a2a2a",
+            color: "white"
+          }}
+        />
 
-          <label className="field">
-            <span>Password</span>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter password" />
-          </label>
-
-          <button className="button primary" type="submit">
-            {mode === "login" ? "Login" : "Create account"}
-          </button>
-        </form>
-
-        <button className="button ghost" onClick={() => setMode(mode === "login" ? "signup" : "login")}>
-          {mode === "login" ? "Need an account? Sign up" : "Already have an account? Login"}
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            border: "none",
+            background: "#2b3445",
+            color: "white",
+            cursor: "pointer"
+          }}
+        >
+          {loading ? "Logging in..." : "Login"}
         </button>
 
-        <Link href="/" className="button ghost" style={{ textAlign: "center" }}>
-          Continue in guest mode
-        </Link>
-      </div>
-    </main>
+        <a href="/signup" style={{ color: "#9ca3af" }}>
+          Don’t have an account? Sign up
+        </a>
+      </form>
+    </div>
   );
 }

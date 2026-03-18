@@ -8,6 +8,38 @@ const openaiKey = process.env.OPENAI_API_KEY!;
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
+const GUEST_CHAT_LIMIT = 50;
+const USER_CHAT_LIMIT = 500;
+
+async function incrementChatUsage(ownerId: string) {
+  const { data: existing } = await supabaseAdmin
+    .from("usage_counts")
+    .select("owner_id, chat_count")
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+
+  if (!existing) {
+    await supabaseAdmin.from("usage_counts").insert({
+      owner_id: ownerId,
+      chat_count: 1,
+      image_count: 0
+    });
+    return { count: 1 };
+  }
+
+  const nextCount = (existing.chat_count || 0) + 1;
+
+  await supabaseAdmin
+    .from("usage_counts")
+    .update({
+      chat_count: nextCount,
+      updated_at: new Date().toISOString()
+    })
+    .eq("owner_id", ownerId);
+
+  return { count: nextCount };
+}
+
 export async function POST(req: Request) {
   try {
     if (!supabaseUrl || !serviceRoleKey || !openaiKey) {
@@ -26,27 +58,64 @@ export async function POST(req: Request) {
       chatId = null
     } = body;
 
-    const isGuest = !userId;
+    const ownerId = userId || guestId;
 
-    if (isGuest && !guestId) {
+    if (!ownerId) {
       return NextResponse.json(
-        { error: "Missing guestId." },
+        { error: "Missing userId or guestId." },
         { status: 400 }
+      );
+    }
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return NextResponse.json(
+        { error: "Messages are required." },
+        { status: 400 }
+      );
+    }
+
+    const usage = await incrementChatUsage(ownerId);
+    const limit = userId ? USER_CHAT_LIMIT : GUEST_CHAT_LIMIT;
+
+    if (usage.count > limit) {
+      return NextResponse.json(
+        { error: `Chat usage limit reached (${limit}).` },
+        { status: 403 }
       );
     }
 
     let activeChatId = chatId;
 
+    if (activeChatId) {
+      const { data: existingChat, error: existingChatError } = await supabaseAdmin
+        .from("chats")
+        .select("id, user_id")
+        .eq("id", activeChatId)
+        .single();
+
+      if (existingChatError || !existingChat) {
+        return NextResponse.json(
+          { error: "Chat not found." },
+          { status: 404 }
+        );
+      }
+
+      if (existingChat.user_id !== ownerId) {
+        return NextResponse.json(
+          { error: "Unauthorized chat access." },
+          { status: 403 }
+        );
+      }
+    }
+
     if (!activeChatId) {
       const firstUserMessage =
-        Array.isArray(messages) && messages.length > 0
-          ? messages.find((m: any) => m.role === "user")?.content || "New Chat"
-          : "New Chat";
+        messages.find((m: any) => m.role === "user")?.content || "New Chat";
 
       const { data: newChat, error: chatError } = await supabaseAdmin
         .from("chats")
         .insert({
-          user_id: userId || guestId,
+          user_id: ownerId,
           title: String(firstUserMessage).slice(0, 50)
         })
         .select()
@@ -62,6 +131,8 @@ export async function POST(req: Request) {
       activeChatId = newChat.id;
     }
 
+    const latestUserMessage = messages[messages.length - 1]?.content || "";
+
     const openaiResponse = await fetch(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -73,52 +144,89 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           model: "gpt-4o-mini",
           temperature: 0.7,
+          stream: true,
           messages: [
-            { role: "system", content: systemPromptForMode(mode) },
-            ...(Array.isArray(messages) ? messages : [])
+            { role: "system", content: systemPromptForMode(mode as any) },
+            ...messages
           ]
         })
       }
     );
 
-    const openaiData = await openaiResponse.json();
-
-    if (!openaiResponse.ok) {
+    if (!openaiResponse.ok || !openaiResponse.body) {
+      const errorText = await openaiResponse.text();
       return NextResponse.json(
-        { error: openaiData?.error?.message || "OpenAI request failed." },
+        { error: errorText || "OpenAI streaming request failed." },
         { status: 500 }
       );
     }
 
-    const assistantReply =
-      openaiData?.choices?.[0]?.message?.content || "No response received.";
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
 
-    const latestUserMessage =
-      messages?.[messages.length - 1]?.content || "";
+    let assistantReply = "";
 
-    const { error: insertError } = await supabaseAdmin.from("messages").insert([
-      {
-        chat_id: activeChatId,
-        role: "user",
-        content: latestUserMessage
-      },
-      {
-        chat_id: activeChatId,
-        role: "assistant",
-        content: assistantReply
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          const reader = openaiResponse.body!.getReader();
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data:")) continue;
+
+              const data = trimmed.replace(/^data:\s*/, "");
+              if (data === "[DONE]") continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                const token = parsed?.choices?.[0]?.delta?.content ?? "";
+
+                if (token) {
+                  assistantReply += token;
+                  controller.enqueue(encoder.encode(token));
+                }
+              } catch {}
+            }
+          }
+
+          await supabaseAdmin.from("messages").insert([
+            {
+              chat_id: activeChatId,
+              role: "user",
+              content: latestUserMessage
+            },
+            {
+              chat_id: activeChatId,
+              role: "assistant",
+              content: assistantReply
+            }
+          ]);
+
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        }
       }
-    ]);
+    });
 
-    if (insertError) {
-      return NextResponse.json(
-        { error: insertError.message },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      reply: assistantReply,
-      chatId: activeChatId
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Chat-Id": String(activeChatId),
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive"
+      }
     });
   } catch (error) {
     return NextResponse.json(

@@ -8,19 +8,43 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
-    const { id, title } = await req.json();
+    const body = await req.json();
+    const { id, title, userId = null, guestId = null } = body;
 
-    if (!id || !title) {
+    const ownerId = userId || guestId;
+
+    if (!id || !title || !ownerId) {
       return NextResponse.json(
-        { error: "Missing id or title" },
+        { error: "Missing id, title, or owner id." },
         { status: 400 }
+      );
+    }
+
+    const { data: chat, error: chatError } = await supabase
+      .from("chats")
+      .select("id, user_id")
+      .eq("id", id)
+      .single();
+
+    if (chatError || !chat) {
+      return NextResponse.json(
+        { error: "Chat not found." },
+        { status: 404 }
+      );
+    }
+
+    if (chat.user_id !== ownerId) {
+      return NextResponse.json(
+        { error: "Unauthorized rename request." },
+        { status: 403 }
       );
     }
 
     const { error } = await supabase
       .from("chats")
-      .update({ title })
-      .eq("id", id);
+      .update({ title: String(title).slice(0, 100) })
+      .eq("id", id)
+      .eq("user_id", ownerId);
 
     if (error) {
       return NextResponse.json(
@@ -30,9 +54,12 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
     return NextResponse.json(
-      { error: "Rename failed" },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to rename chat."
+      },
       { status: 500 }
     );
   }

@@ -1,68 +1,114 @@
 "use client";
 
-import { useState } from "react";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { useEffect, useState } from "react";
+import { supabaseBrowser } from "@/lib/supabase-browser";
 
 export default function SignupPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  async function handleSignup(e: React.FormEvent) {
+  useEffect(() => {
+    async function checkUser() {
+      const {
+        data: { user }
+      } = await supabaseBrowser.auth.getUser();
+
+      if (user) {
+        window.location.href = "/";
+      }
+    }
+
+    checkUser();
+  }, []);
+
+  async function handleSignup(e: any) {
     e.preventDefault();
-    setMessage("");
+    setLoading(true);
 
-    const { error } = await supabase.auth.signUp({
+    const email = e.target.email.value;
+    const password = e.target.password.value;
+
+    const { error } = await supabaseBrowser.auth.signUp({
       email,
       password
     });
 
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
+    setLoading(false);
 
-    setMessage("Signup successful. You can now log in.");
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Check your email to confirm!");
+    }
   }
 
   return (
-    <main style={{ maxWidth: 500, margin: "40px auto", padding: 20 }}>
-      <h1>Sign Up</h1>
+    <div
+      style={{
+        height: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#212121",
+        color: "white"
+      }}
+    >
+      <form
+        onSubmit={handleSignup}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          width: 300
+        }}
+      >
+        <h2>Sign Up</h2>
 
-      <form onSubmit={handleSignup} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <input
-          type="email"
+          name="email"
           placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ padding: 12 }}
           required
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            border: "1px solid #444",
+            background: "#2a2a2a",
+            color: "white"
+          }}
         />
 
         <input
+          name="password"
           type="password"
           placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ padding: 12 }}
           required
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            border: "1px solid #444",
+            background: "#2a2a2a",
+            color: "white"
+          }}
         />
 
-        <button type="submit" style={{ padding: 12 }}>
-          Sign Up
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            padding: 10,
+            borderRadius: 8,
+            border: "none",
+            background: "#2b3445",
+            color: "white",
+            cursor: "pointer"
+          }}
+        >
+          {loading ? "Signing up..." : "Sign Up"}
         </button>
+
+        <a href="/login" style={{ color: "#9ca3af" }}>
+          Already have an account? Login
+        </a>
       </form>
-
-      {message && <p style={{ marginTop: 16 }}>{message}</p>}
-
-      <p style={{ marginTop: 20 }}>
-        Already have an account? <a href="/login">Login</a>
-      </p>
-    </main>
+    </div>
   );
 }
