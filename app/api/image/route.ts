@@ -1,25 +1,34 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import OpenAI from "openai";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const openaiKey = process.env.OPENAI_API_KEY!;
 
-const GUEST_IMAGE_LIMIT = 20;
-const USER_IMAGE_LIMIT = 200;
+const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+const openai = new OpenAI({
+  apiKey: openaiKey
+});
+
+const GUEST_IMAGE_LIMIT = 10;
+const USER_IMAGE_LIMIT = 100;
+
+type ChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
 
 async function incrementImageUsage(ownerId: string) {
-  const { data: existing } = await supabase
+  const { data: existing } = await supabaseAdmin
     .from("usage_counts")
     .select("owner_id, image_count")
     .eq("owner_id", ownerId)
     .maybeSingle();
 
   if (!existing) {
-    await supabase.from("usage_counts").insert({
+    await supabaseAdmin.from("usage_counts").insert({
       owner_id: ownerId,
       chat_count: 0,
       image_count: 1
@@ -29,7 +38,7 @@ async function incrementImageUsage(ownerId: string) {
 
   const nextCount = (existing.image_count || 0) + 1;
 
-  await supabase
+  await supabaseAdmin
     .from("usage_counts")
     .update({
       image_count: nextCount,
@@ -40,16 +49,66 @@ async function incrementImageUsage(ownerId: string) {
   return { count: nextCount };
 }
 
+function normalizeMessages(messages: any[]): ChatMessage[] {
+  if (!Array.isArray(messages)) return [];
+
+  return messages
+    .filter(
+      (m) =>
+        m &&
+        (m.role === "user" || m.role === "assistant" || m.role === "system") &&
+        typeof m.content === "string" &&
+        m.content.trim().length > 0
+    )
+    .map((m) => ({
+      role: m.role,
+      content: m.content
+    }));
+}
+
+function buildImagePrompt(messages: ChatMessage[]) {
+  const latestUserMessage =
+    [...messages].reverse().find((m) => m.role === "user")?.content?.trim() || "";
+
+  if (!latestUserMessage) {
+    return "Create a high-quality digital illustration.";
+  }
+
+  return latestUserMessage;
+}
+
 export async function POST(req: Request) {
   try {
+    if (!supabaseUrl || !serviceRoleKey || !openaiKey) {
+      return NextResponse.json(
+        { error: "Missing required environment variables." },
+        { status: 500 }
+      );
+    }
+
     const body = await req.json();
-    const { messages, guestId = null, userId = null, chatId = null } = body;
+
+    const {
+      messages,
+      userId = null,
+      guestId = null,
+      chatId = null
+    } = body;
 
     const ownerId = userId || guestId;
 
     if (!ownerId) {
       return NextResponse.json(
         { error: "Missing userId or guestId." },
+        { status: 400 }
+      );
+    }
+
+    const normalizedMessages = normalizeMessages(messages);
+
+    if (normalizedMessages.length === 0) {
+      return NextResponse.json(
+        { error: "Messages are required." },
         { status: 400 }
       );
     }
@@ -64,24 +123,46 @@ export async function POST(req: Request) {
       );
     }
 
-    const prompt =
-      messages?.[messages.length - 1]?.content || "A creative image";
-
     let activeChatId = chatId;
 
+    if (activeChatId) {
+      const { data: existingChat, error: existingChatError } = await supabaseAdmin
+        .from("chats")
+        .select("id, user_id")
+        .eq("id", activeChatId)
+        .single();
+
+      if (existingChatError || !existingChat) {
+        return NextResponse.json(
+          { error: "Chat not found." },
+          { status: 404 }
+        );
+      }
+
+      if (existingChat.user_id !== ownerId) {
+        return NextResponse.json(
+          { error: "Unauthorized chat access." },
+          { status: 403 }
+        );
+      }
+    }
+
     if (!activeChatId) {
-      const { data: newChat, error: chatError } = await supabase
+      const firstUserMessage =
+        normalizedMessages.find((m) => m.role === "user")?.content || "New Chat";
+
+      const { data: newChat, error: chatError } = await supabaseAdmin
         .from("chats")
         .insert({
           user_id: ownerId,
-          title: String(prompt).slice(0, 50)
+          title: String(firstUserMessage).slice(0, 50)
         })
         .select()
         .single();
 
       if (chatError || !newChat) {
         return NextResponse.json(
-          { error: chatError?.message || "Failed to create image chat." },
+          { error: chatError?.message || "Failed to create chat." },
           { status: 500 }
         );
       }
@@ -89,54 +170,65 @@ export async function POST(req: Request) {
       activeChatId = newChat.id;
     }
 
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-image-1",
-        prompt,
-        size: "1024x1024"
-      })
+    const prompt = buildImagePrompt(normalizedMessages);
+    const latestUserMessage =
+      [...normalizedMessages].reverse().find((m) => m.role === "user")?.content || prompt;
+
+    const imageResponse = await openai.images.generate({
+      model: "gpt-image-1",
+      prompt,
+      size: "1024x1024"
     });
 
-    const data = await response.json();
+    const imageBase64 = imageResponse.data?.[0]?.b64_json;
+    const imageUrlFromApi = imageResponse.data?.[0]?.url;
 
-    if (!response.ok) {
+    let finalImageUrl = imageUrlFromApi || "";
+
+    if (imageBase64) {
+      finalImageUrl = `data:image/png;base64,${imageBase64}`;
+    }
+
+    if (!finalImageUrl) {
       return NextResponse.json(
-        { error: data?.error?.message || "Image generation failed." },
+        { error: "Image generation failed." },
         { status: 500 }
       );
     }
 
-    const imageUrl =
-      data?.data?.[0]?.url ||
-      `data:image/png;base64,${data?.data?.[0]?.b64_json || ""}`;
-
-    await supabase.from("messages").insert([
+    const { error: insertError } = await supabaseAdmin.from("messages").insert([
       {
         chat_id: activeChatId,
         role: "user",
-        content: prompt
+        content: latestUserMessage
       },
       {
         chat_id: activeChatId,
         role: "assistant",
-        content: imageUrl
+        content: finalImageUrl
       }
     ]);
 
+    if (insertError) {
+      return NextResponse.json(
+        { error: insertError.message || "Failed to save image chat." },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
-      url: imageUrl,
+      url: finalImageUrl,
       chatId: activeChatId
     });
   } catch (error) {
+    console.error("POST /api/image error:", error);
+
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : "Image generation failed."
+          error instanceof Error
+            ? error.message
+            : "Failed to generate image."
       },
       { status: 500 }
     );
