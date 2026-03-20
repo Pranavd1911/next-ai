@@ -20,16 +20,23 @@ export default function SignupPage() {
     checkUser();
   }, []);
 
-  async function handleSignup(e: any) {
+  async function handleSignup(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
 
-    const email = e.target.email.value;
-    const password = e.target.password.value;
+    const form = e.currentTarget;
+    const email = (form.email as HTMLInputElement).value.trim();
+    const password = (form.password as HTMLInputElement).value;
+
+    const redirectUrl =
+      process.env.NEXT_PUBLIC_APP_URL || "https://next-ai-git-main-pranavd1911s-projects.vercel.app";
 
     const { error } = await supabaseBrowser.auth.signUp({
       email,
-      password
+      password,
+      options: {
+        emailRedirectTo: redirectUrl
+      }
     });
 
     setLoading(false);
@@ -37,19 +44,21 @@ export default function SignupPage() {
     if (error) {
       alert(error.message);
     } else {
-      alert("Check your email to confirm!");
+      alert("Check your email to confirm your account.");
     }
   }
 
   return (
     <div
       style={{
-        height: "100vh",
+        minHeight: "100vh",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         background: "#212121",
-        color: "white"
+        color: "white",
+        fontFamily: "Arial, sans-serif",
+        padding: 20
       }}
     >
       <form
@@ -58,21 +67,33 @@ export default function SignupPage() {
           display: "flex",
           flexDirection: "column",
           gap: 12,
-          width: 300
+          width: "100%",
+          maxWidth: 360,
+          background: "#1f1f1f",
+          border: "1px solid #333",
+          borderRadius: 16,
+          padding: 24,
+          boxSizing: "border-box"
         }}
       >
-        <h2>Sign Up</h2>
+        <h2 style={{ margin: 0, marginBottom: 6 }}>Sign Up</h2>
+
+        <div style={{ color: "#9ca3af", fontSize: 14, marginBottom: 8 }}>
+          Create your NEXA AI account
+        </div>
 
         <input
           name="email"
+          type="email"
           placeholder="Email"
           required
           style={{
-            padding: 10,
-            borderRadius: 8,
+            padding: 12,
+            borderRadius: 10,
             border: "1px solid #444",
             background: "#2a2a2a",
-            color: "white"
+            color: "white",
+            outline: "none"
           }}
         />
 
@@ -81,12 +102,14 @@ export default function SignupPage() {
           type="password"
           placeholder="Password"
           required
+          minLength={6}
           style={{
-            padding: 10,
-            borderRadius: 8,
+            padding: 12,
+            borderRadius: 10,
             border: "1px solid #444",
             background: "#2a2a2a",
-            color: "white"
+            color: "white",
+            outline: "none"
           }}
         />
 
@@ -94,18 +117,28 @@ export default function SignupPage() {
           type="submit"
           disabled={loading}
           style={{
-            padding: 10,
-            borderRadius: 8,
+            padding: 12,
+            borderRadius: 10,
             border: "none",
             background: "#2b3445",
             color: "white",
-            cursor: "pointer"
+            cursor: loading ? "not-allowed" : "pointer",
+            opacity: loading ? 0.7 : 1
           }}
         >
           {loading ? "Signing up..." : "Sign Up"}
         </button>
 
-        <a href="/login" style={{ color: "#9ca3af" }}>
+        <a
+          href="/login"
+          style={{
+            color: "#9ca3af",
+            textDecoration: "none",
+            fontSize: 14,
+            textAlign: "center",
+            marginTop: 4
+          }}
+        >
           Already have an account? Login
         </a>
       </form>
