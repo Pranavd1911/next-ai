@@ -161,11 +161,8 @@ export default function Home() {
       const mobile = window.innerWidth < 900;
       setIsMobile(mobile);
 
-      if (mobile) {
-        setSidebarOpen(false);
-      } else {
-        setSidebarOpen(true);
-      }
+      if (mobile) setSidebarOpen(false);
+      else setSidebarOpen(true);
     }
 
     handleResize();
@@ -770,17 +767,15 @@ export default function Home() {
   };
 
   const iconButtonStyle: React.CSSProperties = {
-    ...primaryButtonStyle,
-    width: 44,
-    minWidth: 44,
-    height: 44,
-    minHeight: 44,
+    background: "#2b3445",
+    color: "white",
+    border: "1px solid #3b465a",
+    borderRadius: 999,
     padding: 0,
-    fontSize: 18,
+    cursor: "pointer",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0
+    justifyContent: "center"
   };
 
   const smallButtonStyle: React.CSSProperties = {
@@ -806,8 +801,7 @@ export default function Home() {
   };
 
   const sidebarStyle: React.CSSProperties = {
-    width: isMobile ? "86vw" : 280,
-    maxWidth: isMobile ? 320 : 280,
+    width: isMobile ? 290 : 280,
     background: "#171717",
     borderRight: "1px solid #2f2f2f",
     padding: 12,
@@ -815,12 +809,11 @@ export default function Home() {
     flexShrink: 0,
     position: isMobile ? "fixed" : "relative",
     top: 0,
-    left: 0,
+    left: isMobile ? 0 : undefined,
     height: "100vh",
     zIndex: isMobile ? 40 : "auto",
     display: "flex",
-    flexDirection: "column",
-    boxShadow: isMobile ? "0 10px 30px rgba(0,0,0,0.45)" : "none"
+    flexDirection: "column"
   };
 
   return (
@@ -951,8 +944,7 @@ export default function Home() {
               width: "100%",
               marginBottom: 14,
               background: "#2a2a2a",
-              border: "1px solid #3a3a3a",
-              minHeight: 44
+              border: "1px solid #3a3a3a"
             }}
             onClick={newChat}
           >
@@ -1073,8 +1065,7 @@ export default function Home() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            gap: 10,
-            flexWrap: "nowrap"
+            gap: 12
           }}
         >
           <div
@@ -1082,8 +1073,8 @@ export default function Home() {
               display: "flex",
               gap: 10,
               alignItems: "center",
-              minWidth: 0,
-              flex: 1
+              width: "100%",
+              minWidth: 0
             }}
           >
             <button
@@ -1096,8 +1087,7 @@ export default function Home() {
                 fontSize: 20,
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0
+                justifyContent: "center"
               }}
               onClick={() => setSidebarOpen(!sidebarOpen)}
               title="Toggle sidebar"
@@ -1109,44 +1099,44 @@ export default function Home() {
               style={{
                 fontSize: isMobile ? 18 : 20,
                 fontWeight: 700,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis"
+                whiteSpace: "nowrap"
               }}
             >
               Nexa AI
             </div>
-          </div>
 
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value)}
-            style={{
-              background: "#2a2a2a",
-              color: "white",
-              border: "1px solid #3a3a3a",
-              borderRadius: 8,
-              padding: "8px 10px",
-              flexShrink: 0
-            }}
-          >
-            <option value="general">Chat</option>
-            <option value="image">Image</option>
-          </select>
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.target.value)}
+              style={{
+                marginLeft: "auto",
+                background: "#2a2a2a",
+                color: "white",
+                border: "1px solid #3a3a3a",
+                borderRadius: 8,
+                padding: isMobile ? "7px 8px" : "8px 10px",
+                minWidth: isMobile ? 80 : 96,
+                fontSize: isMobile ? 13 : 14
+              }}
+            >
+              <option value="general">Chat</option>
+              <option value="image">Image</option>
+            </select>
+          </div>
         </div>
 
         <div
           style={{
             flex: 1,
             overflowY: "auto",
-            padding: isMobile ? "14px 0" : "24px 0"
+            padding: isMobile ? "12px 0" : "24px 0"
           }}
         >
           {messages.length === 0 ? (
             <div
               style={{
                 maxWidth: 800,
-                margin: isMobile ? "40px auto 0 auto" : "80px auto 0 auto",
+                margin: isMobile ? "32px auto 0 auto" : "80px auto 0 auto",
                 textAlign: "center",
                 color: "#cbd5e1",
                 padding: "0 20px"
@@ -1154,19 +1144,19 @@ export default function Home() {
             >
               <div
                 style={{
-                  fontSize: isMobile ? 26 : 34,
+                  fontSize: isMobile ? 24 : 34,
                   fontWeight: 700,
                   marginBottom: 12
                 }}
               >
                 How can I help you today?
               </div>
-              <div style={{ color: "#9ca3af", fontSize: isMobile ? 15 : 16 }}>
+              <div style={{ color: "#9ca3af", fontSize: isMobile ? 14 : 16 }}>
                 Ask anything, upload files, take photos, generate images, or continue an earlier chat.
               </div>
             </div>
           ) : (
-            <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 10px" }}>
+            <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 12px" }}>
               {messages.map((m, i) => {
                 const parsedFile = parseFileMessage(m.content);
                 const isImage =
@@ -1192,7 +1182,7 @@ export default function Home() {
                   >
                     <div
                       style={{
-                        maxWidth: isMobile ? "96%" : isUser ? "75%" : "85%",
+                        maxWidth: isMobile ? "94%" : isUser ? "75%" : "85%",
                         background: isUser ? "#2f6fed" : "#2a2a2a",
                         color: "white",
                         borderRadius: 18,
@@ -1479,9 +1469,7 @@ export default function Home() {
               })}
 
               {loading && (
-                <div style={{ color: "#9ca3af", marginTop: 8, paddingLeft: 6 }}>
-                  Thinking...
-                </div>
+                <div style={{ color: "#9ca3af", marginTop: 8 }}>Thinking...</div>
               )}
 
               <div ref={bottomRef} />
@@ -1493,7 +1481,7 @@ export default function Home() {
           style={{
             borderTop: "1px solid #2f2f2f",
             background: "#212121",
-            padding: isMobile ? "10px" : "16px 20px 20px 20px"
+            padding: isMobile ? "10px 12px 14px 12px" : "16px 20px 20px 20px"
           }}
         >
           <div
@@ -1550,9 +1538,9 @@ export default function Home() {
             <div
               style={{
                 display: "flex",
+                alignItems: "flex-end",
                 gap: 8,
-                flexDirection: "row",
-                alignItems: "flex-end"
+                width: "100%"
               }}
             >
               <input
@@ -1567,7 +1555,15 @@ export default function Home() {
 
               <button
                 type="button"
-                style={iconButtonStyle}
+                style={{
+                  ...iconButtonStyle,
+                  width: 44,
+                  minWidth: 44,
+                  height: 44,
+                  minHeight: 44,
+                  fontSize: 18,
+                  flexShrink: 0
+                }}
                 onClick={() => fileInputRef.current?.click()}
                 title="Upload"
               >
@@ -1576,7 +1572,15 @@ export default function Home() {
 
               <button
                 type="button"
-                style={iconButtonStyle}
+                style={{
+                  ...iconButtonStyle,
+                  width: 44,
+                  minWidth: 44,
+                  height: 44,
+                  minHeight: 44,
+                  fontSize: 18,
+                  flexShrink: 0
+                }}
                 onClick={openCamera}
                 title="Camera"
               >
@@ -1596,26 +1600,30 @@ export default function Home() {
                     void sendMessage();
                   }
                 }}
-                rows={isMobile ? 2 : 1}
+                rows={1}
                 style={{
                   flex: 1,
-                  padding: 12,
+                  minWidth: 0,
+                  height: 44,
+                  minHeight: 44,
+                  maxHeight: 120,
+                  padding: "10px 14px",
                   background: "#2a2a2a",
                   color: "white",
                   border: "1px solid #3a3a3a",
-                  borderRadius: 16,
+                  borderRadius: 22,
                   outline: "none",
                   resize: "none",
-                  minHeight: 44,
-                  maxHeight: isMobile ? 96 : 120,
-                  width: "100%",
-                  boxSizing: "border-box"
+                  boxSizing: "border-box",
+                  overflowY: "auto",
+                  fontSize: 15,
+                  lineHeight: 1.4
                 }}
                 placeholder={
                   mode === "image"
                     ? "Describe the image you want"
                     : selectedFile
-                    ? "Ask something about the file/photo, or press Send to upload only"
+                    ? "Ask something about the file/photo..."
                     : "Message Nexa AI"
                 }
               />
@@ -1624,6 +1632,12 @@ export default function Home() {
                 type="button"
                 style={{
                   ...iconButtonStyle,
+                  width: 44,
+                  minWidth: 44,
+                  height: 44,
+                  minHeight: 44,
+                  fontSize: 18,
+                  flexShrink: 0,
                   opacity: loading ? 0.7 : 1
                 }}
                 disabled={loading}
