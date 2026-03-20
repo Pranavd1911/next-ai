@@ -1,0 +1,261 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const openaiKey = process.env.OPENAI_API_KEY!;
+
+const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+// ------------------------
+// Extract embedded text
+// ------------------------
+async function extractEmbeddedText(file: File, buffer: Buffer) {
+  const mimeType = file.type || "application/octet-stream";
+  const fileName = file.name.toLowerCase();
+
+  try {
+    if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
+      const pdfParseModule = await import("pdf-parse");
+      const pdfParse = (pdfParseModule as any).default || pdfParseModule;
+      const result = await pdfParse(buffer);
+      return (result?.text || "").trim();
+    }
+
+    if (
+      mimeType.startsWith("text/") ||
+      fileName.endsWith(".txt") ||
+      fileName.endsWith(".md") ||
+      fileName.endsWith(".csv") ||
+      fileName.endsWith(".json")
+    ) {
+      return buffer.toString("utf-8").trim();
+    }
+
+    return "";
+  } catch (error) {
+    console.error("Embedded text extraction failed:", error);
+    return "";
+  }
+}
+
+// ------------------------
+// OCR using OpenAI Vision
+// ------------------------
+async function runVisionOcr(imageDataUrl: string) {
+  if (!openaiKey) return "";
+
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You extract text from document images. Return only the text. No explanation."
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Extract all readable text from this document."
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: imageDataUrl,
+                  detail: "high"
+                }
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error("OCR API error:", data);
+      return "";
+    }
+
+    return (data?.choices?.[0]?.message?.content || "").trim();
+  } catch (error) {
+    console.error("Vision OCR failed:", error);
+    return "";
+  }
+}
+
+// ------------------------
+// MAIN ROUTE
+// ------------------------
+export async function POST(req: Request) {
+  try {
+    const formData = await req.formData();
+
+    const file = formData.get("file") as File | null;
+    const userId = (formData.get("userId") as string) || null;
+    const guestId = (formData.get("guestId") as string) || null;
+    let chatId = (formData.get("chatId") as string) || null;
+
+    const ownerId = userId || guestId;
+
+    if (!ownerId) {
+      return NextResponse.json(
+        { error: "Missing userId or guestId." },
+        { status: 400 }
+      );
+    }
+
+    if (!file) {
+      return NextResponse.json(
+        { error: "No file received." },
+        { status: 400 }
+      );
+    }
+
+    // ------------------------
+    // GET MULTIPLE OCR IMAGES
+    // ------------------------
+    const ocrImages: string[] = [];
+
+    for (let i = 0; i < 5; i++) {
+      const img = formData.get(`ocrImageDataUrl_${i}`) as string;
+      if (img) ocrImages.push(img);
+    }
+
+    console.log("OCR images received:", ocrImages.length);
+
+    // ------------------------
+    // CREATE CHAT IF NEEDED
+    // ------------------------
+    if (!chatId) {
+      const { data: newChat, error: chatError } = await supabaseAdmin
+        .from("chats")
+        .insert({
+          user_id: ownerId,
+          title: `File: ${file.name}`.slice(0, 50)
+        })
+        .select()
+        .single();
+
+      if (chatError || !newChat) {
+        return NextResponse.json(
+          { error: chatError?.message || "Failed to create chat." },
+          { status: 500 }
+        );
+      }
+
+      chatId = newChat.id;
+    }
+
+    // ------------------------
+    // UPLOAD FILE
+    // ------------------------
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const safeName = file.name.replace(/\s+/g, "_");
+    const filePath = `${ownerId}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("uploads")
+      .upload(filePath, buffer, {
+        contentType: file.type || "application/octet-stream",
+        upsert: false
+      });
+
+    if (uploadError) {
+      return NextResponse.json(
+        { error: uploadError.message },
+        { status: 500 }
+      );
+    }
+
+    const { data: publicUrlData } = supabaseAdmin.storage
+      .from("uploads")
+      .getPublicUrl(filePath);
+
+    const fileUrl = publicUrlData.publicUrl;
+    const mimeType = file.type || "application/octet-stream";
+
+    // ------------------------
+    // TEXT EXTRACTION
+    // ------------------------
+    let extractedText = await extractEmbeddedText(file, buffer);
+    let extractionStatus = "";
+
+    if (extractedText.trim()) {
+      extractionStatus = "TEXT_EXTRACTED";
+    } else if (ocrImages.length > 0) {
+      let combinedText = "";
+
+      for (const img of ocrImages) {
+        const pageText = await runVisionOcr(img);
+        combinedText += "\n\n" + pageText;
+      }
+
+      extractedText = combinedText.trim();
+      extractionStatus = extractedText
+        ? "OCR_TEXT_EXTRACTED"
+        : "NO_TEXT_EXTRACTED";
+    } else {
+      extractionStatus = "NO_TEXT_EXTRACTED";
+    }
+
+    extractedText = extractedText.slice(0, 20000);
+
+    console.log("Extraction status:", extractionStatus);
+    console.log("Extracted length:", extractedText.length);
+
+    // ------------------------
+    // STORE MESSAGE
+    // ------------------------
+    const messageContent = `FILETEXT::${encodeURIComponent(
+      file.name
+    )}::${encodeURIComponent(fileUrl)}::${encodeURIComponent(
+      mimeType
+    )}::${encodeURIComponent(extractedText)}::${encodeURIComponent(
+      extractionStatus
+    )}`;
+
+    const { error: insertError } = await supabaseAdmin.from("messages").insert({
+      chat_id: chatId,
+      role: "user",
+      content: messageContent
+    });
+
+    if (insertError) {
+      return NextResponse.json(
+        { error: insertError.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      chatId,
+      fileName: file.name,
+      fileUrl,
+      mimeType,
+      extractedText,
+      extractionStatus,
+      extractedLength: extractedText.length,
+      messageContent
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "File upload failed."
+      },
+      { status: 500 }
+    );
+  }
+}

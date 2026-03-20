@@ -19,6 +19,14 @@ type Segment =
   | { type: "markdown"; content: string }
   | { type: "code"; content: string };
 
+type ParsedFileMessage = {
+  fileName: string;
+  fileUrl: string;
+  mimeType: string;
+  extractedText: string;
+  extractionStatus: string;
+};
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -31,11 +39,23 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const [cameraLoading, setCameraLoading] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
 
-  async function migrateGuestChats(currentGuestId: string, currentUserId: string) {
+  async function migrateGuestChats(
+    currentGuestId: string,
+    currentUserId: string
+  ) {
     try {
       await fetch("/api/migrate-guest", {
         method: "POST",
@@ -50,8 +70,8 @@ export default function Home() {
     } catch {}
   }
 
-  async function loadHistory(currentUserId?: string | null) {
-    const actualUserId = currentUserId ?? userId;
+  async function loadHistory(currentUserIdArg?: string | null) {
+    const actualUserId = currentUserIdArg ?? userId;
     const params = new URLSearchParams();
 
     if (actualUserId) {
@@ -63,7 +83,9 @@ export default function Home() {
       return;
     }
 
-    const res = await fetch(`/api/history?${params.toString()}`);
+    const res = await fetch(`/api/history?${params.toString()}`, {
+      cache: "no-store"
+    });
     const data = await res.json();
     setHistory(Array.isArray(data) ? data : []);
   }
@@ -75,7 +97,9 @@ export default function Home() {
     if (userId) params.set("userId", userId);
     else if (guestId) params.set("guestId", guestId);
 
-    const res = await fetch(`/api/chat-messages?${params.toString()}`);
+    const res = await fetch(`/api/chat-messages?${params.toString()}`, {
+      cache: "no-store"
+    });
     const data = await res.json();
 
     if (Array.isArray(data)) {
@@ -86,7 +110,10 @@ export default function Home() {
         }))
       );
       setActiveChatId(chatId);
-      if (isMobile) setSidebarOpen(false);
+
+      if (isMobile) {
+        setSidebarOpen(false);
+      }
     }
   }
 
@@ -138,12 +165,14 @@ export default function Home() {
     function handleResize() {
       const mobile = window.innerWidth < 900;
       setIsMobile(mobile);
+
       if (mobile) setSidebarOpen(false);
       else setSidebarOpen(true);
     }
 
     handleResize();
     window.addEventListener("resize", handleResize);
+
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
@@ -151,17 +180,82 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
+
   const filteredHistory = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return history;
     return history.filter((h) => (h.title || "").toLowerCase().includes(q));
   }, [history, search]);
 
+  function parseFileMessage(content: string): ParsedFileMessage | null {
+    if (!content.startsWith("FILETEXT::")) return null;
+
+    const parts = content.split("::");
+    if (parts.length < 6) return null;
+
+    return {
+      fileName: decodeURIComponent(parts[1] || ""),
+      fileUrl: decodeURIComponent(parts[2] || ""),
+      mimeType: decodeURIComponent(parts[3] || ""),
+      extractedText: decodeURIComponent(parts[4] || ""),
+      extractionStatus: decodeURIComponent(parts[5] || "")
+    };
+  }
+
+  function convertMessagesForApi(sourceMessages: Msg[]) {
+    return sourceMessages.map((m) => {
+      const parsed = parseFileMessage(m.content);
+
+      if (!parsed) return m;
+
+      if (parsed.extractedText && parsed.extractedText.trim().length > 0) {
+        const shorterText =
+          parsed.extractedText.length > 15000
+            ? parsed.extractedText.slice(0, 15000)
+            : parsed.extractedText;
+
+        return {
+          role: m.role,
+          content: [
+            "The user uploaded a file.",
+            `File name: ${parsed.fileName}`,
+            `File type: ${parsed.mimeType}`,
+            "Use the extracted file content below to answer the user's next question.",
+            'If the user asks to summarize or explain the file, use this text.',
+            "",
+            "BEGIN FILE CONTENT",
+            shorterText,
+            "END FILE CONTENT"
+          ].join("\n")
+        };
+      }
+
+      return {
+        role: m.role,
+        content: [
+          "The user uploaded a file.",
+          `File name: ${parsed.fileName}`,
+          `File type: ${parsed.mimeType}`,
+          "No text could be extracted from this file.",
+          "If asked about this file, explain that the file may be scanned or image-based.",
+          `File URL: ${parsed.fileUrl}`
+        ].join("\n")
+      };
+    });
+  }
+
   async function streamAssistantReply(nextMessages: Msg[], response: Response) {
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
 
-    if (!reader) throw new Error("No response body found.");
+    if (!reader) {
+      throw new Error("No response body found.");
+    }
 
     let accumulated = "";
     setMessages([...nextMessages, { role: "assistant", content: "" }]);
@@ -171,37 +265,272 @@ export default function Home() {
       if (done) break;
 
       accumulated += decoder.decode(value, { stream: true });
-
       setMessages([...nextMessages, { role: "assistant", content: accumulated }]);
     }
   }
 
-  async function sendMessage(customMessages?: Msg[]) {
-    const nextMessages = customMessages
-      ? customMessages
-      : [...messages, { role: "user", content: input }];
+  async function fileToDataUrl(file: File): Promise<string> {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
 
-    if (!customMessages && !input.trim()) return;
+      reader.onload = () => {
+        if (typeof reader.result === "string") resolve(reader.result);
+        else reject(new Error("Failed to read file."));
+      };
 
-    if (!customMessages) {
-      setMessages(nextMessages);
-      setInput("");
+      reader.onerror = () => reject(new Error("Failed to read file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function buildOcrImageDataUrls(file: File): Promise<string[]> {
+    const name = file.name.toLowerCase();
+    const type = file.type || "";
+
+    if (type.startsWith("image/")) {
+      const dataUrl = await fileToDataUrl(file);
+      return [dataUrl];
     }
 
-    if (isMobile) setSidebarOpen(false);
+    if (type === "application/pdf" || name.endsWith(".pdf")) {
+      try {
+        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+        (pdfjsLib as any).GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${
+          (pdfjsLib as any).version
+        }/legacy/build/pdf.worker.min.mjs`;
+
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = (pdfjsLib as any).getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+
+        const maxPages = Math.min(pdf.numPages, 2);
+        const images: string[] = [];
+
+        for (let i = 1; i <= maxPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 1.5 });
+
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+
+          if (!context) continue;
+
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+
+          await page.render({
+            canvasContext: context,
+            viewport
+          }).promise;
+
+          images.push(canvas.toDataURL("image/png"));
+        }
+
+        return images;
+      } catch (error) {
+        console.error("PDF image generation failed:", error);
+        return [];
+      }
+    }
+
+    return [];
+  }
+
+  function stopCamera() {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+  }
+
+  async function openCamera() {
+    try {
+      setCameraError("");
+      setCameraLoading(true);
+      setCameraOpen(true);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false
+      });
+
+      cameraStreamRef.current = stream;
+
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      }, 50);
+    } catch (error) {
+      console.error(error);
+      setCameraError("Could not access camera. Please allow permission and try again.");
+    } finally {
+      setCameraLoading(false);
+    }
+  }
+
+  function closeCamera() {
+    stopCamera();
+    setCameraOpen(false);
+    setCameraError("");
+    setCameraLoading(false);
+  }
+
+  async function capturePhoto() {
+    try {
+      const video = videoRef.current;
+      if (!video) {
+        alert("Camera not ready.");
+        return;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        alert("Could not capture image.");
+        return;
+      }
+
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", 0.9)
+      );
+
+      if (!blob) {
+        alert("Could not capture image.");
+        return;
+      }
+
+      const capturedFile = new File([blob], `camera-capture-${Date.now()}.jpg`, {
+        type: "image/jpeg"
+      });
+
+      setSelectedFile(capturedFile);
+      closeCamera();
+    } catch (error) {
+      console.error(error);
+      alert("Camera capture failed.");
+    }
+  }
+
+  async function uploadSelectedFile(): Promise<{
+    uploadedMessage: Msg | null;
+    returnedChatId: string | null;
+  }> {
+    if (!selectedFile) {
+      return { uploadedMessage: null, returnedChatId: activeChatId };
+    }
+
+    const formData = new FormData();
+    formData.append("file", selectedFile);
+
+    if (userId) formData.append("userId", userId);
+    if (guestId) formData.append("guestId", guestId);
+    if (activeChatId) formData.append("chatId", activeChatId);
+
+    const fileType = selectedFile.type || "";
+    const fileName = selectedFile.name.toLowerCase();
+    const shouldRunOcr =
+      fileType.startsWith("image/") ||
+      fileType === "application/pdf" ||
+      fileName.endsWith(".pdf");
+
+    if (shouldRunOcr) {
+      const ocrImages = await buildOcrImageDataUrls(selectedFile);
+
+      ocrImages.forEach((img, index) => {
+        if (img && typeof img === "string") {
+          formData.append(`ocrImageDataUrl_${index}`, img);
+        }
+      });
+    }
+
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data?.error || "File upload failed.");
+    }
+
+    const uploadedMessage: Msg = {
+      role: "user",
+      content: data.messageContent
+    };
+
+    setSelectedFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
+    return {
+      uploadedMessage,
+      returnedChatId: data.chatId || activeChatId
+    };
+  }
+
+  async function sendMessage(customMessages?: Msg[]) {
+    if (loading) return;
+    if (!customMessages && !input.trim() && !selectedFile) return;
+
     setLoading(true);
 
     try {
+      let workingMessages = customMessages ? [...customMessages] : [...messages];
+      let currentChatId = activeChatId;
+
+      if (!customMessages && selectedFile) {
+        const uploadResult = await uploadSelectedFile();
+
+        if (uploadResult.uploadedMessage) {
+          workingMessages = [...workingMessages, uploadResult.uploadedMessage];
+          setMessages(workingMessages);
+        }
+
+        if (uploadResult.returnedChatId && !currentChatId) {
+          currentChatId = uploadResult.returnedChatId;
+          setActiveChatId(uploadResult.returnedChatId);
+        }
+
+        if (!input.trim()) {
+          await loadHistory();
+          return;
+        }
+      }
+
+      const trimmedInput = input.trim();
+
+      const nextMessages = customMessages
+        ? workingMessages
+        : [...workingMessages, { role: "user", content: trimmedInput }];
+
+      if (!customMessages) {
+        setInput("");
+        setMessages(nextMessages);
+      }
+
+      if (isMobile) setSidebarOpen(false);
+
       if (mode === "image") {
         const imageRes = await fetch("/api/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            messages: nextMessages,
+            messages: convertMessagesForApi(nextMessages),
             mode,
             guestId,
             userId,
-            chatId: activeChatId
+            chatId: currentChatId
           })
         });
 
@@ -222,21 +551,24 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: nextMessages,
+          messages: convertMessagesForApi(nextMessages),
           mode,
           guestId,
           userId,
-          chatId: activeChatId
+          chatId: currentChatId
         })
       });
 
       if (!res.ok) {
         let errorMessage = "Request failed.";
+
         try {
           const errorData = await res.json();
           errorMessage = errorData?.error || errorMessage;
         } catch {}
+
         setMessages([...nextMessages, { role: "assistant", content: errorMessage }]);
+        await loadHistory();
         return;
       }
 
@@ -247,8 +579,14 @@ export default function Home() {
 
       await streamAssistantReply(nextMessages, res);
       await loadHistory();
-    } catch {
-      setMessages([...nextMessages, { role: "assistant", content: "Request failed." }]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: error instanceof Error ? error.message : "Request failed."
+        }
+      ]);
     } finally {
       setLoading(false);
     }
@@ -287,13 +625,8 @@ export default function Home() {
     try {
       const res = await fetch("/api/clear-all", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          userId,
-          guestId
-        })
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, guestId })
       });
 
       const data = await res.json();
@@ -318,9 +651,7 @@ export default function Home() {
 
     await fetch("/api/rename", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         id,
         title: newTitle.trim(),
@@ -332,24 +663,15 @@ export default function Home() {
     await loadHistory();
   }
 
-  async function handleLogout() {
-    try {
-      await supabaseBrowser.auth.signOut();
-      await fetch("/api/logout", { method: "POST" });
-      setUserId(null);
-      setUserEmail(null);
-      setActiveChatId(null);
-      setMessages([]);
-      setHistory([]);
-      window.location.href = "/";
-    } catch {
-      alert("Logout failed");
-    }
-  }
-
   function newChat() {
     setMessages([]);
     setActiveChatId(null);
+    setSelectedFile(null);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
     if (isMobile) setSidebarOpen(false);
   }
 
@@ -449,6 +771,19 @@ export default function Home() {
     cursor: "pointer"
   };
 
+  const iconButtonStyle: React.CSSProperties = {
+    ...primaryButtonStyle,
+    width: 48,
+    minWidth: 48,
+    height: 48,
+    minHeight: 48,
+    padding: 0,
+    fontSize: 20,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  };
+
   const smallButtonStyle: React.CSSProperties = {
     background: "#2b3445",
     color: "white",
@@ -482,7 +817,9 @@ export default function Home() {
     top: 0,
     left: isMobile ? 0 : undefined,
     height: "100vh",
-    zIndex: isMobile ? 40 : "auto"
+    zIndex: isMobile ? 40 : "auto",
+    display: "flex",
+    flexDirection: "column"
   };
 
   return (
@@ -506,6 +843,103 @@ export default function Home() {
             zIndex: 30
           }}
         />
+      )}
+
+      {cameraOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 60,
+            background: "rgba(0,0,0,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 760,
+              background: "#171717",
+              border: "1px solid #2f2f2f",
+              borderRadius: 18,
+              padding: 16
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 12
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 700 }}>Camera</div>
+              <button style={primaryButtonStyle} onClick={closeCamera}>
+                Close
+              </button>
+            </div>
+
+            {cameraLoading && (
+              <div style={{ color: "#cbd5e1", marginBottom: 12 }}>
+                Opening camera...
+              </div>
+            )}
+
+            {cameraError && (
+              <div style={{ color: "#fca5a5", marginBottom: 12 }}>
+                {cameraError}
+              </div>
+            )}
+
+            <div
+              style={{
+                width: "100%",
+                background: "#0f0f0f",
+                borderRadius: 12,
+                overflow: "hidden",
+                border: "1px solid #2f2f2f"
+              }}
+            >
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  display: "block",
+                  width: "100%",
+                  maxHeight: "70vh",
+                  objectFit: "cover",
+                  background: "black"
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                marginTop: 14,
+                flexWrap: "wrap"
+              }}
+            >
+              <button
+                style={primaryButtonStyle}
+                onClick={capturePhoto}
+                disabled={cameraLoading}
+              >
+                Capture
+              </button>
+
+              <button style={primaryButtonStyle} onClick={closeCamera}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {sidebarOpen && (
@@ -568,53 +1002,55 @@ export default function Home() {
             Chats
           </div>
 
-          {filteredHistory.length === 0 && (
-            <div style={{ color: "#9ca3af", fontSize: 14 }}>
-              {search.trim() ? "No matching chats." : "No chats yet."}
-            </div>
-          )}
+          <div style={{ flex: 1, overflowY: "auto", paddingRight: 2 }}>
+            {filteredHistory.length === 0 && (
+              <div style={{ color: "#9ca3af", fontSize: 14 }}>
+                {search.trim() ? "No matching chats." : "No chats yet."}
+              </div>
+            )}
 
-          {filteredHistory.map((h) => (
-            <div
-              key={h.id}
-              style={{
-                padding: 10,
-                marginBottom: 10,
-                borderRadius: 10,
-                background: activeChatId === h.id ? "#2a2a2a" : "transparent",
-                border: "1px solid #2f2f2f"
-              }}
-            >
+            {filteredHistory.map((h) => (
               <div
+                key={h.id}
                 style={{
-                  cursor: "pointer",
-                  marginBottom: 8,
-                  color: "#f5f5f5",
-                  fontWeight: 600,
-                  wordBreak: "break-word",
-                  fontSize: 14
+                  padding: 10,
+                  marginBottom: 10,
+                  borderRadius: 10,
+                  background: activeChatId === h.id ? "#2a2a2a" : "transparent",
+                  border: "1px solid #2f2f2f"
                 }}
-                onClick={() => loadChat(h.id)}
               >
-                {h.title || "New Chat"}
-              </div>
+                <div
+                  style={{
+                    cursor: "pointer",
+                    marginBottom: 8,
+                    color: "#f5f5f5",
+                    fontWeight: 600,
+                    wordBreak: "break-word",
+                    fontSize: 14
+                  }}
+                  onClick={() => loadChat(h.id)}
+                >
+                  {h.title || "New Chat"}
+                </div>
 
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  style={smallButtonStyle}
-                  onClick={() => renameChat(h.id, h.title)}
-                >
-                  Rename
-                </button>
-                <button
-                  style={smallButtonStyle}
-                  onClick={() => deleteChat(h.id)}
-                >
-                  Delete
-                </button>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    style={smallButtonStyle}
+                    onClick={() => renameChat(h.id, h.title)}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    style={smallButtonStyle}
+                    onClick={() => deleteChat(h.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
@@ -649,10 +1085,21 @@ export default function Home() {
             }}
           >
             <button
-              style={primaryButtonStyle}
+              style={{
+                ...primaryButtonStyle,
+                width: 42,
+                minWidth: 42,
+                height: 42,
+                padding: 0,
+                fontSize: 20,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
+              }}
               onClick={() => setSidebarOpen(!sidebarOpen)}
+              title="Toggle sidebar"
             >
-              {sidebarOpen ? "Hide Sidebar" : "Show Sidebar"}
+              ☰
             </button>
 
             <div style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700 }}>
@@ -673,61 +1120,6 @@ export default function Home() {
               <option value="general">Chat</option>
               <option value="image">Image</option>
             </select>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              alignItems: "center",
-              width: isMobile ? "100%" : "auto",
-              justifyContent: isMobile ? "flex-start" : "flex-end",
-              flexWrap: "wrap"
-            }}
-          >
-            {!userId && (
-              <>
-                <a href="/login" style={{ color: "#d1d5db", textDecoration: "none" }}>
-                  Login
-                </a>
-                <a href="/signup" style={{ color: "#d1d5db", textDecoration: "none" }}>
-                  Sign Up
-                </a>
-              </>
-            )}
-
-            {userId && (
-              <>
-                <div
-                  style={{
-                    color: "#d1d5db",
-                    fontSize: 14,
-                    background: "#2a2a2a",
-                    border: "1px solid #3a3a3a",
-                    borderRadius: 999,
-                    padding: "8px 12px",
-                    maxWidth: isMobile ? "100%" : 260,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap"
-                  }}
-                  title={userEmail || ""}
-                >
-                  {userEmail || "Logged in"}
-                </div>
-
-                <a
-                  href="/settings"
-                  style={{ color: "#d1d5db", textDecoration: "none" }}
-                >
-                  Settings
-                </a>
-
-                <button style={primaryButtonStyle} onClick={handleLogout}>
-                  Logout
-                </button>
-              </>
-            )}
           </div>
         </div>
 
@@ -758,19 +1150,20 @@ export default function Home() {
                 How can I help you today?
               </div>
               <div style={{ color: "#9ca3af", fontSize: isMobile ? 15 : 16 }}>
-                Ask anything, generate images, or continue an earlier chat.
+                Ask anything, upload files, take photos, generate images, or continue an earlier chat.
               </div>
             </div>
           ) : (
             <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 12px" }}>
               {messages.map((m, i) => {
+                const parsedFile = parseFileMessage(m.content);
                 const isImage =
+                  !parsedFile &&
                   typeof m.content === "string" &&
-                  (m.content.startsWith("http") ||
-                    m.content.startsWith("data:image"));
+                  (m.content.startsWith("http") || m.content.startsWith("data:image"));
 
                 const segments =
-                  !isImage && typeof m.content === "string"
+                  !isImage && !parsedFile && typeof m.content === "string"
                     ? splitContentIntoSegments(m.content)
                     : [];
 
@@ -806,7 +1199,90 @@ export default function Home() {
                         {isUser ? "You" : "AI"}
                       </div>
 
-                      {isImage ? (
+                      {parsedFile ? (
+                        <div>
+                          <div
+                            style={{
+                              border: "1px solid rgba(255,255,255,0.2)",
+                              borderRadius: 12,
+                              padding: 12,
+                              background: "rgba(0,0,0,0.15)"
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                              Uploaded file
+                            </div>
+
+                            <div style={{ marginBottom: 6, wordBreak: "break-word" }}>
+                              {parsedFile.fileName}
+                            </div>
+
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: "#dbeafe",
+                                marginBottom: 6
+                              }}
+                            >
+                              {parsedFile.mimeType}
+                            </div>
+
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color:
+                                  parsedFile.extractionStatus === "TEXT_EXTRACTED" ||
+                                  parsedFile.extractionStatus === "OCR_TEXT_EXTRACTED"
+                                    ? "#86efac"
+                                    : "#fca5a5",
+                                marginBottom: 10
+                              }}
+                            >
+                              {parsedFile.extractionStatus === "TEXT_EXTRACTED"
+                                ? "Embedded text extracted successfully"
+                                : parsedFile.extractionStatus === "OCR_TEXT_EXTRACTED"
+                                ? "OCR text extracted successfully"
+                                : "No extractable text found"}
+                            </div>
+
+                            {parsedFile.extractedText && (
+                              <div
+                                style={{
+                                  marginTop: 10,
+                                  padding: 10,
+                                  borderRadius: 10,
+                                  background: "rgba(255,255,255,0.06)",
+                                  fontSize: 13,
+                                  whiteSpace: "pre-wrap",
+                                  maxHeight: 220,
+                                  overflowY: "auto"
+                                }}
+                              >
+                                {parsedFile.extractedText.slice(0, 1200)}
+                                {parsedFile.extractedText.length > 1200 ? "..." : ""}
+                              </div>
+                            )}
+
+                            <a
+                              href={parsedFile.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                color: "white",
+                                textDecoration: "none",
+                                background: "#1e293b",
+                                border: "1px solid #334155",
+                                borderRadius: 8,
+                                padding: "8px 10px",
+                                display: "inline-block",
+                                marginTop: 10
+                              }}
+                            >
+                              Open file
+                            </a>
+                          </div>
+                        </div>
+                      ) : isImage ? (
                         <div>
                           <img
                             src={m.content}
@@ -959,14 +1435,22 @@ export default function Home() {
                         </div>
                       )}
 
-                      {!isUser && !isImage && (
-                        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                      {!isUser && !isImage && !parsedFile && (
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            marginTop: 12,
+                            flexWrap: "wrap"
+                          }}
+                        >
                           <button
                             style={smallButtonStyle}
                             onClick={() => copyText(m.content)}
                           >
                             Copy
                           </button>
+
                           {i === messages.length - 1 && (
                             <button
                               style={smallButtonStyle}
@@ -985,6 +1469,7 @@ export default function Home() {
               {loading && (
                 <div style={{ color: "#9ca3af", marginTop: 8 }}>Thinking...</div>
               )}
+
               <div ref={bottomRef} />
             </div>
           )}
@@ -1000,52 +1485,150 @@ export default function Home() {
           <div
             style={{
               maxWidth: 860,
-              margin: "0 auto",
-              display: "flex",
-              gap: 12,
-              flexDirection: isMobile ? "column" : "row"
+              margin: "0 auto"
             }}
           >
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !loading) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              rows={isMobile ? 2 : 1}
-              style={{
-                flex: 1,
-                padding: 14,
-                background: "#2a2a2a",
-                color: "white",
-                border: "1px solid #3a3a3a",
-                borderRadius: 16,
-                outline: "none",
-                resize: "none",
-                minHeight: isMobile ? 74 : 52,
-                width: "100%",
-                boxSizing: "border-box"
-              }}
-              placeholder={
-                mode === "image"
-                  ? "Describe the image you want"
-                  : "Message Nexa AI"
-              }
-            />
+            {selectedFile && (
+              <div
+                style={{
+                  marginBottom: 10,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "#2a2a2a",
+                  border: "1px solid #3a3a3a",
+                  borderRadius: 999,
+                  padding: "8px 12px",
+                  maxWidth: "100%"
+                }}
+              >
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    maxWidth: 260
+                  }}
+                >
+                  {selectedFile.name}
+                </span>
 
-            <button
+                <button
+                  onClick={() => {
+                    setSelectedFile(null);
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = "";
+                    }
+                  }}
+                  style={{
+                    background: "transparent",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: 16
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
+            <div
               style={{
-                ...primaryButtonStyle,
-                width: isMobile ? "100%" : "auto",
-                minHeight: 48
+                display: "flex",
+                gap: 12,
+                flexDirection: isMobile ? "column" : "row",
+                alignItems: isMobile ? "stretch" : "center"
               }}
-              onClick={() => sendMessage()}
             >
-              Send
-            </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setSelectedFile(file);
+                }}
+                style={{ display: "none" }}
+              />
+
+              <button
+                type="button"
+                style={{
+                  ...iconButtonStyle,
+                  width: isMobile ? "100%" : 48
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                title="Upload"
+              >
+                📎
+              </button>
+
+              <button
+                type="button"
+                style={{
+                  ...iconButtonStyle,
+                  width: isMobile ? "100%" : 48
+                }}
+                onClick={openCamera}
+                title="Camera"
+              >
+                📷
+              </button>
+
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+
+                    if (loading) return;
+                    if (!input.trim() && !selectedFile) return;
+
+                    void sendMessage();
+                  }
+                }}
+                rows={isMobile ? 2 : 1}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  background: "#2a2a2a",
+                  color: "white",
+                  border: "1px solid #3a3a3a",
+                  borderRadius: 16,
+                  outline: "none",
+                  resize: "none",
+                  minHeight: isMobile ? 74 : 52,
+                  width: "100%",
+                  boxSizing: "border-box"
+                }}
+                placeholder={
+                  mode === "image"
+                    ? "Describe the image you want"
+                    : selectedFile
+                    ? "Ask something about the file/photo, or press Send to upload only"
+                    : "Message Nexa AI"
+                }
+              />
+
+              <button
+                type="button"
+                style={{
+                  ...iconButtonStyle,
+                  width: isMobile ? "100%" : 48,
+                  opacity: loading ? 0.7 : 1
+                }}
+                disabled={loading}
+                onClick={() => {
+                  if (loading) return;
+                  if (!input.trim() && !selectedFile) return;
+                  void sendMessage();
+                }}
+                title="Send"
+              >
+                {loading ? "⏳" : "➤"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
