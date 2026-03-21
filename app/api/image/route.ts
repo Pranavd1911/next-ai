@@ -49,19 +49,27 @@ async function incrementImageUsage(ownerId: string) {
   return { count: nextCount };
 }
 
-function normalizeMessages(messages: any[]): ChatMessage[] {
+function normalizeMessages(messages: unknown[]): ChatMessage[] {
   if (!Array.isArray(messages)) return [];
 
   return messages
+    .filter((m): m is { role: string; content: string } => {
+      return (
+        !!m &&
+        typeof m === "object" &&
+        "role" in m &&
+        "content" in m &&
+        typeof (m as { role: unknown }).role === "string" &&
+        typeof (m as { content: unknown }).content === "string"
+      );
+    })
     .filter(
       (m) =>
-        m &&
         (m.role === "user" || m.role === "assistant" || m.role === "system") &&
-        typeof m.content === "string" &&
         m.content.trim().length > 0
     )
     .map((m) => ({
-      role: m.role,
+      role: m.role as "system" | "user" | "assistant",
       content: m.content
     }));
 }
@@ -123,7 +131,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let activeChatId = chatId;
+    let activeChatId = chatId as string | null;
 
     if (activeChatId) {
       const { data: existingChat, error: existingChatError } = await supabaseAdmin
@@ -180,13 +188,16 @@ export async function POST(req: Request) {
       size: "1024x1024"
     });
 
-    const imageBase64 = imageResponse.data?.[0]?.b64_json;
-    const imageUrlFromApi = imageResponse.data?.[0]?.url;
+    const firstImage = imageResponse.data?.[0];
+    const imageBase64 = firstImage?.b64_json;
+    const imageUrl = firstImage?.url;
 
-    let finalImageUrl = imageUrlFromApi || "";
+    let finalImageUrl = "";
 
     if (imageBase64) {
       finalImageUrl = `data:image/png;base64,${imageBase64}`;
+    } else if (imageUrl) {
+      finalImageUrl = imageUrl;
     }
 
     if (!finalImageUrl) {
