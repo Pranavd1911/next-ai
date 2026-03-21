@@ -56,28 +56,27 @@ async function incrementChatUsage(ownerId: string) {
   return { count: nextCount };
 }
 
-function normalizeMessages(messages: any[]): ChatMessage[] {
+function normalizeMessages(messages: unknown[]): ChatMessage[] {
   if (!Array.isArray(messages)) return [];
 
   return messages
+    .filter((m): m is { role: string; content: string } => {
+      return (
+        !!m &&
+        typeof m === "object" &&
+        "role" in m &&
+        "content" in m &&
+        typeof (m as { role: unknown }).role === "string" &&
+        typeof (m as { content: unknown }).content === "string"
+      );
+    })
     .filter(
       (m) =>
-        m &&
         (m.role === "user" || m.role === "assistant" || m.role === "system") &&
-        typeof m.content === "string" &&
         m.content.trim().length > 0
     )
     .map((m) => ({
-      role: m.role,
-      content: m.content
-    }));
-}
-
-function toAnthropicMessages(messages: ChatMessage[]) {
-  return messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({
-      role: m.role,
+      role: m.role as "system" | "user" | "assistant",
       content: m.content
     }));
 }
@@ -104,14 +103,6 @@ export async function POST(req: Request) {
 
     const ownerId = userId || guestId;
 
-    console.log("POST /api/chat called");
-    console.log("body.chatId:", chatId);
-    console.log("body.model:", model);
-    console.log("body.mode:", mode);
-    console.log("body.userId:", userId);
-    console.log("body.guestId:", guestId);
-    console.log("ownerId:", ownerId);
-
     if (!ownerId) {
       return NextResponse.json(
         { error: "Missing userId or guestId." },
@@ -120,12 +111,6 @@ export async function POST(req: Request) {
     }
 
     const normalizedMessages = normalizeMessages(messages);
-
-    console.log("normalizedMessages:", normalizedMessages.length);
-    console.log(
-      "latest message preview:",
-      normalizedMessages[normalizedMessages.length - 1]?.content?.slice(0, 80)
-    );
 
     if (normalizedMessages.length === 0) {
       return NextResponse.json(
@@ -144,7 +129,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let activeChatId = chatId;
+    let activeChatId = chatId as string | null;
 
     if (activeChatId) {
       const { data: existingChat, error: existingChatError } = await supabaseAdmin
@@ -169,8 +154,6 @@ export async function POST(req: Request) {
     }
 
     if (!activeChatId) {
-      console.log("No activeChatId, creating new chat...");
-
       const firstUserMessage =
         normalizedMessages.find((m) => m.role === "user")?.content || "New Chat";
 
@@ -191,7 +174,6 @@ export async function POST(req: Request) {
       }
 
       activeChatId = newChat.id;
-      console.log("Created new chat:", activeChatId);
     }
 
     const latestUserMessage =
@@ -199,48 +181,66 @@ export async function POST(req: Request) {
 
     const systemPrompt = systemPromptForMode(mode as any);
 
-    console.log("Preparing stream with model:", model);
-
     const encoder = new TextEncoder();
     let assistantReply = "";
+    let streamClosed = false;
 
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          console.log("Stream started");
-
           if (model === "claude") {
-            console.log("Using Claude stream");
-
             if (!anthropicKey) {
               controller.enqueue(
                 encoder.encode("Claude is not configured on the server.")
               );
               controller.close();
+              streamClosed = true;
               return;
             }
+
+            const anthropicMessages = normalizedMessages
+              .filter(
+                (
+                  m
+                ): m is {
+                  role: "user" | "assistant";
+                  content: string;
+                } => m.role === "user" || m.role === "assistant"
+              )
+              .map((m) => ({
+                role: m.role,
+                content: m.content
+              }));
 
             const anthropicStream = await anthropic.messages.create({
               model: "claude-sonnet-4-6",
               max_tokens: 2000,
               temperature: 0.7,
               system: systemPrompt,
-              messages: toAnthropicMessages(normalizedMessages),
+              messages: anthropicMessages as any,
               stream: true
             });
 
             for await (const event of anthropicStream) {
               if (event.type === "content_block_delta") {
-                const token = event.delta?.text || "";
-                if (token) {
+                const token =
+                  "text" in event.delta && typeof event.delta.text === "string"
+                    ? event.delta.text
+                    : "";
+
+                if (token && !streamClosed) {
                   assistantReply += token;
-                  controller.enqueue(encoder.encode(token));
+
+                  try {
+                    controller.enqueue(encoder.encode(token));
+                  } catch {
+                    streamClosed = true;
+                    break;
+                  }
                 }
               }
             }
           } else {
-            console.log("Using OpenAI stream");
-
             const openaiStream = await openai.chat.completions.create({
               model: "gpt-4o-mini",
               temperature: 0.7,
@@ -253,19 +253,21 @@ export async function POST(req: Request) {
 
             for await (const chunk of openaiStream) {
               const token = chunk.choices?.[0]?.delta?.content ?? "";
-              if (token) {
+
+              if (token && !streamClosed) {
                 assistantReply += token;
-                controller.enqueue(encoder.encode(token));
+
+                try {
+                  controller.enqueue(encoder.encode(token));
+                } catch {
+                  streamClosed = true;
+                  break;
+                }
               }
             }
           }
 
           if (latestUserMessage.trim() || assistantReply.trim()) {
-            console.log("Saving messages to DB...");
-            console.log("activeChatId:", activeChatId);
-            console.log("latestUserMessage:", latestUserMessage.slice(0, 80));
-            console.log("assistantReply length:", assistantReply.length);
-
             await supabaseAdmin.from("messages").insert([
               {
                 chat_id: activeChatId,
@@ -280,14 +282,23 @@ export async function POST(req: Request) {
             ]);
           }
 
-          controller.close();
+          if (!streamClosed) {
+            controller.close();
+            streamClosed = true;
+          }
         } catch (error) {
           console.error("Streaming error:", error);
-          controller.error(error);
+
+          if (!streamClosed) {
+            controller.error(error);
+            streamClosed = true;
+          }
         }
       },
 
-      cancel() {}
+      cancel() {
+        streamClosed = true;
+      }
     });
 
     return new Response(stream, {
