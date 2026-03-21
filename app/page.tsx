@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type SVGProps
+} from "react";
 import ReactMarkdown from "react-markdown";
 import { getGuestId } from "@/lib/guest";
 import { supabaseBrowser } from "@/lib/supabase-browser";
@@ -30,6 +37,93 @@ type ParsedFileMessage = {
 type SelectedModel = "auto" | "openai" | "claude";
 type ResolvedRoute = "openai" | "claude" | "image";
 
+function IconBase(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      width="20"
+      height="20"
+      aria-hidden="true"
+      {...props}
+    />
+  );
+}
+
+function MenuIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 6h16" />
+      <path d="M4 12h16" />
+      <path d="M4 18h16" />
+    </IconBase>
+  );
+}
+
+function SendIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M22 2 11 13" />
+      <path d="M22 2 15 22l-4-9-9-4 20-7Z" />
+    </IconBase>
+  );
+}
+
+function StopIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </IconBase>
+  );
+}
+
+function PaperclipIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="m21.44 11.05-8.49 8.49a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.49-8.48" />
+    </IconBase>
+  );
+}
+
+function CameraIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M4 7h3l2-3h6l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" />
+      <circle cx="12" cy="13" r="4" />
+    </IconBase>
+  );
+}
+
+function SettingsIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-.33-1 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1-.33H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-.6 1.65 1.65 0 0 0 .33-1V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 .33 1 1.65 1.65 0 0 0 1 .6 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.26.3.47.65.6 1 .09.32.12.65.09 1 .03.35 0 .68-.09 1-.13.35-.34.7-.6 1Z" />
+    </IconBase>
+  );
+}
+
+function UserIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M20 21a8 8 0 0 0-16 0" />
+      <circle cx="12" cy="8" r="4" />
+    </IconBase>
+  );
+}
+
+function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </IconBase>
+  );
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -43,6 +137,7 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedModel, setSelectedModel] = useState<SelectedModel>("auto");
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -53,6 +148,7 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
 
@@ -191,6 +287,20 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowProfileMenu(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   const filteredHistory = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return history;
@@ -212,8 +322,26 @@ export default function Home() {
     };
   }
 
+  function isGeneratedImageMessage(message: Msg) {
+    if (message.role !== "assistant") return false;
+    if (typeof message.content !== "string") return false;
+
+    return (
+      message.content.startsWith("data:image/") ||
+      message.content.startsWith("http")
+    );
+  }
+
   function convertMessagesForApi(sourceMessages: Msg[]) {
     return sourceMessages.map((m) => {
+      if (isGeneratedImageMessage(m)) {
+        return {
+          role: "assistant",
+          content:
+            "[The assistant previously generated an image in this chat. The image data has been omitted from context, but the user may still refer to it.]"
+        };
+      }
+
       const parsed = parseFileMessage(m.content);
 
       if (!parsed) return m;
@@ -423,6 +551,17 @@ export default function Home() {
       abortControllerRef.current = null;
     }
     setLoading(false);
+  }
+
+  async function handleLogout() {
+    try {
+      await supabaseBrowser.auth.signOut();
+      await fetch("/api/logout", { method: "POST" });
+      setShowProfileMenu(false);
+      window.location.href = "/";
+    } catch {
+      alert("Logout failed");
+    }
   }
 
   async function openCamera() {
@@ -635,11 +774,12 @@ export default function Home() {
 
         const imageData = await imageRes.json();
         const imageReply = imageData.url || imageData.error || "...";
+        const newChatId = imageData.chatId || currentChatId || activeChatId || null;
 
         setMessages([...nextMessages, { role: "assistant", content: imageReply }]);
 
-        if (imageData.chatId && !activeChatId) {
-          setActiveChatId(imageData.chatId);
+        if (newChatId) {
+          setActiveChatId(newChatId);
         }
 
         await loadHistory();
@@ -674,7 +814,7 @@ export default function Home() {
       }
 
       const returnedChatId = res.headers.get("X-Chat-Id");
-      if (returnedChatId && !activeChatId) {
+      if (returnedChatId) {
         setActiveChatId(returnedChatId);
       }
 
@@ -868,7 +1008,7 @@ export default function Home() {
     return segments.filter((s) => s.content.length > 0);
   }
 
-  const primaryButtonStyle: React.CSSProperties = {
+  const primaryButtonStyle: CSSProperties = {
     background: "#2b3445",
     color: "white",
     border: "1px solid #3b465a",
@@ -877,7 +1017,7 @@ export default function Home() {
     cursor: "pointer"
   };
 
-  const iconButtonStyle: React.CSSProperties = {
+  const iconButtonStyle: CSSProperties = {
     ...primaryButtonStyle,
     width: 44,
     minWidth: 44,
@@ -891,7 +1031,7 @@ export default function Home() {
     flexShrink: 0
   };
 
-  const smallButtonStyle: React.CSSProperties = {
+  const smallButtonStyle: CSSProperties = {
     background: "#2b3445",
     color: "white",
     border: "1px solid #3b465a",
@@ -901,7 +1041,7 @@ export default function Home() {
     fontSize: 12
   };
 
-  const dangerButtonStyle: React.CSSProperties = {
+  const dangerButtonStyle: CSSProperties = {
     background: "#3a1f1f",
     color: "white",
     border: "1px solid #5a2d2d",
@@ -913,7 +1053,7 @@ export default function Home() {
     marginBottom: 12
   };
 
-  const sidebarStyle: React.CSSProperties = {
+  const sidebarStyle: CSSProperties = {
     width: isMobile ? 290 : 280,
     background: "#171717",
     borderRight: "1px solid #2f2f2f",
@@ -1088,14 +1228,17 @@ export default function Home() {
           <a
             href="/settings"
             style={{
-              display: "block",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
               marginBottom: 14,
               color: "#cbd5e1",
               textDecoration: "none",
               fontSize: 14
             }}
           >
-            Settings
+            <SettingsIcon width={18} height={18} />
+            <span>Settings</span>
           </a>
 
           <div
@@ -1198,7 +1341,6 @@ export default function Home() {
                 minWidth: 42,
                 height: 42,
                 padding: 0,
-                fontSize: 20,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center"
@@ -1206,7 +1348,7 @@ export default function Home() {
               onClick={() => setSidebarOpen(!sidebarOpen)}
               title="Toggle sidebar"
             >
-              ☰
+              <MenuIcon width={20} height={20} />
             </button>
 
             <div style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700 }}>
@@ -1228,6 +1370,139 @@ export default function Home() {
               <option value="openai">OpenAI</option>
               <option value="claude">Claude</option>
             </select>
+          </div>
+
+          <div
+            ref={profileMenuRef}
+            style={{
+              position: "relative",
+              marginLeft: isMobile ? 0 : "auto"
+            }}
+          >
+            <button
+              onClick={() => setShowProfileMenu((prev) => !prev)}
+              style={{
+                ...primaryButtonStyle,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "8px 10px"
+              }}
+              title="Profile"
+            >
+              <UserIcon width={18} height={18} />
+              <ChevronDownIcon width={16} height={16} />
+            </button>
+
+            {showProfileMenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 8px)",
+                  right: 0,
+                  width: 240,
+                  background: "#1f1f1f",
+                  border: "1px solid #333",
+                  borderRadius: 14,
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+                  overflow: "hidden",
+                  zIndex: 80
+                }}
+              >
+                {userId ? (
+                  <>
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        borderBottom: "1px solid #2f2f2f",
+                        background: "#191919"
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#9ca3af",
+                          marginBottom: 4
+                        }}
+                      >
+                        Logged in as
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          color: "white",
+                          wordBreak: "break-word",
+                          fontWeight: 600
+                        }}
+                      >
+                        {userEmail || "Account"}
+                      </div>
+                    </div>
+
+                    <a
+                      href="/settings"
+                      onClick={() => setShowProfileMenu(false)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        padding: "12px 14px",
+                        color: "white",
+                        textDecoration: "none",
+                        borderBottom: "1px solid #2f2f2f"
+                      }}
+                    >
+                      <SettingsIcon width={18} height={18} />
+                      <span>Settings</span>
+                    </a>
+
+                    <button
+                      onClick={handleLogout}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "12px 14px",
+                        background: "transparent",
+                        color: "#fca5a5",
+                        border: "none",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Logout
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <a
+                      href="/login"
+                      onClick={() => setShowProfileMenu(false)}
+                      style={{
+                        display: "block",
+                        padding: "12px 14px",
+                        color: "white",
+                        textDecoration: "none",
+                        borderBottom: "1px solid #2f2f2f"
+                      }}
+                    >
+                      Login
+                    </a>
+
+                    <a
+                      href="/signup"
+                      onClick={() => setShowProfileMenu(false)}
+                      style={{
+                        display: "block",
+                        padding: "12px 14px",
+                        color: "white",
+                        textDecoration: "none"
+                      }}
+                    >
+                      Sign Up
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1668,7 +1943,7 @@ export default function Home() {
                   onClick={() => fileInputRef.current?.click()}
                   title="Upload"
                 >
-                  📎
+                  <PaperclipIcon width={18} height={18} />
                 </button>
 
                 <button
@@ -1677,7 +1952,7 @@ export default function Home() {
                   onClick={openCamera}
                   title="Camera"
                 >
-                  📷
+                  <CameraIcon width={18} height={18} />
                 </button>
 
                 <textarea
@@ -1727,7 +2002,7 @@ export default function Home() {
                     onClick={stopGeneration}
                     title="Stop"
                   >
-                    ■
+                    <StopIcon width={18} height={18} />
                   </button>
                 ) : (
                   <button
@@ -1739,7 +2014,7 @@ export default function Home() {
                     }}
                     title="Send"
                   >
-                    ➤
+                    <SendIcon width={18} height={18} />
                   </button>
                 )}
               </div>
@@ -1767,7 +2042,7 @@ export default function Home() {
                   onClick={() => fileInputRef.current?.click()}
                   title="Upload"
                 >
-                  📎
+                  <PaperclipIcon width={18} height={18} />
                 </button>
 
                 <button
@@ -1776,7 +2051,7 @@ export default function Home() {
                   onClick={openCamera}
                   title="Camera"
                 >
-                  📷
+                  <CameraIcon width={18} height={18} />
                 </button>
 
                 <textarea
@@ -1824,7 +2099,7 @@ export default function Home() {
                     onClick={stopGeneration}
                     title="Stop"
                   >
-                    ■
+                    <StopIcon width={18} height={18} />
                   </button>
                 ) : (
                   <button
@@ -1836,7 +2111,7 @@ export default function Home() {
                     }}
                     title="Send"
                   >
-                    ➤
+                    <SendIcon width={18} height={18} />
                   </button>
                 )}
               </div>
