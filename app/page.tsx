@@ -879,15 +879,16 @@ export default function Home() {
 
   const iconButtonStyle: React.CSSProperties = {
     ...primaryButtonStyle,
-    width: 48,
-    minWidth: 48,
-    height: 48,
-    minHeight: 48,
+    width: 44,
+    minWidth: 44,
+    height: 44,
+    minHeight: 44,
     padding: 0,
-    fontSize: 20,
+    fontSize: 18,
     display: "flex",
     alignItems: "center",
-    justifyContent: "center"
+    justifyContent: "center",
+    flexShrink: 0
   };
 
   const smallButtonStyle: React.CSSProperties = {
@@ -1589,7 +1590,7 @@ export default function Home() {
           style={{
             borderTop: "1px solid #2f2f2f",
             background: "#212121",
-            padding: isMobile ? "12px" : "16px 20px 20px 20px"
+            padding: isMobile ? "10px 12px 12px 12px" : "16px 20px 20px 20px"
           }}
         >
           <div
@@ -1643,113 +1644,203 @@ export default function Home() {
               </div>
             )}
 
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                flexDirection: isMobile ? "column" : "row",
-                alignItems: isMobile ? "stretch" : "center"
-              }}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] || null;
-                  setSelectedFile(file);
-                }}
-                style={{ display: "none" }}
-              />
-
-              <button
-                type="button"
+            {isMobile ? (
+              <div
                 style={{
-                  ...iconButtonStyle,
-                  width: isMobile ? "100%" : 48
+                  display: "flex",
+                  alignItems: "flex-end",
+                  gap: 8
                 }}
-                onClick={() => fileInputRef.current?.click()}
-                title="Upload"
               >
-                📎
-              </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setSelectedFile(file);
+                  }}
+                  style={{ display: "none" }}
+                />
 
-              <button
-                type="button"
-                style={{
-                  ...iconButtonStyle,
-                  width: isMobile ? "100%" : 48
-                }}
-                onClick={openCamera}
-                title="Camera"
-              >
-                📷
-              </button>
+                <button
+                  type="button"
+                  style={iconButtonStyle}
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Upload"
+                >
+                  📎
+                </button>
 
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
+                <button
+                  type="button"
+                  style={iconButtonStyle}
+                  onClick={openCamera}
+                  title="Camera"
+                >
+                  📷
+                </button>
 
-                    if (loading) return;
-                    if (!input.trim() && !selectedFile) return;
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
 
-                    void sendMessage();
+                      if (loading) return;
+                      if (!input.trim() && !selectedFile) return;
+
+                      void sendMessage();
+                    }
+                  }}
+                  rows={1}
+                  style={{
+                    flex: 1,
+                    padding: "12px 14px",
+                    background: "#2a2a2a",
+                    color: "white",
+                    border: "1px solid #3a3a3a",
+                    borderRadius: 16,
+                    outline: "none",
+                    resize: "none",
+                    minHeight: 44,
+                    maxHeight: 120,
+                    width: "100%",
+                    boxSizing: "border-box",
+                    lineHeight: 1.4
+                  }}
+                  placeholder={
+                    selectedFile
+                      ? "Ask about the file/photo..."
+                      : "Message Nexa AI"
                   }
-                }}
-                rows={isMobile ? 2 : 1}
-                style={{
-                  flex: 1,
-                  padding: 14,
-                  background: "#2a2a2a",
-                  color: "white",
-                  border: "1px solid #3a3a3a",
-                  borderRadius: 16,
-                  outline: "none",
-                  resize: "none",
-                  minHeight: isMobile ? 74 : 52,
-                  width: "100%",
-                  boxSizing: "border-box"
-                }}
-                placeholder={
-                  selectedFile
-                    ? "Ask something about the file/photo, or press Send to upload only"
-                    : "Message Nexa AI"
-                }
-              />
+                />
 
-              {loading ? (
+                {loading ? (
+                  <button
+                    type="button"
+                    style={{
+                      ...iconButtonStyle,
+                      background: "#4b1d1d",
+                      border: "1px solid #7a2d2d"
+                    }}
+                    onClick={stopGeneration}
+                    title="Stop"
+                  >
+                    ■
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    style={iconButtonStyle}
+                    onClick={() => {
+                      if (!input.trim() && !selectedFile) return;
+                      void sendMessage();
+                    }}
+                    title="Send"
+                  >
+                    ➤
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  alignItems: "center"
+                }}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setSelectedFile(file);
+                  }}
+                  style={{ display: "none" }}
+                />
+
                 <button
                   type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    width: isMobile ? "100%" : 48,
-                    background: "#4b1d1d",
-                    border: "1px solid #7a2d2d"
-                  }}
-                  onClick={stopGeneration}
-                  title="Stop"
+                  style={iconButtonStyle}
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Upload"
                 >
-                  ■
+                  📎
                 </button>
-              ) : (
+
                 <button
                   type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    width: isMobile ? "100%" : 48
-                  }}
-                  onClick={() => {
-                    if (!input.trim() && !selectedFile) return;
-                    void sendMessage();
-                  }}
-                  title="Send"
+                  style={iconButtonStyle}
+                  onClick={openCamera}
+                  title="Camera"
                 >
-                  ➤
+                  📷
                 </button>
-              )}
-            </div>
+
+                <textarea
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+
+                      if (loading) return;
+                      if (!input.trim() && !selectedFile) return;
+
+                      void sendMessage();
+                    }
+                  }}
+                  rows={1}
+                  style={{
+                    flex: 1,
+                    padding: 14,
+                    background: "#2a2a2a",
+                    color: "white",
+                    border: "1px solid #3a3a3a",
+                    borderRadius: 16,
+                    outline: "none",
+                    resize: "none",
+                    minHeight: 52,
+                    width: "100%",
+                    boxSizing: "border-box"
+                  }}
+                  placeholder={
+                    selectedFile
+                      ? "Ask something about the file/photo, or press Send to upload only"
+                      : "Message Nexa AI"
+                  }
+                />
+
+                {loading ? (
+                  <button
+                    type="button"
+                    style={{
+                      ...iconButtonStyle,
+                      background: "#4b1d1d",
+                      border: "1px solid #7a2d2d"
+                    }}
+                    onClick={stopGeneration}
+                    title="Stop"
+                  >
+                    ■
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    style={iconButtonStyle}
+                    onClick={() => {
+                      if (!input.trim() && !selectedFile) return;
+                      void sendMessage();
+                    }}
+                    title="Send"
+                  >
+                    ➤
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
