@@ -3233,37 +3233,6 @@ export default function Home() {
               </button>
             </div>
 
-            <div
-              style={{
-                marginBottom: 10,
-                background: "#1f1f1f",
-                border: "1px solid #333",
-                borderRadius: 12,
-                padding: 10
-              }}
-            >
-              <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>
-                Remember this about me
-              </div>
-              <textarea
-                value={rememberedMemory}
-                onChange={(e) => setRememberedMemory(e.target.value)}
-                onBlur={() => void savePreferences({ memory: rememberedMemory })}
-                rows={2}
-                placeholder="Example: I am a PM student. I prefer concise answers."
-                style={{
-                  width: "100%",
-                  background: "#111827",
-                  color: "white",
-                  border: "1px solid #374151",
-                  borderRadius: 10,
-                  padding: 10,
-                  resize: "vertical",
-                  boxSizing: "border-box"
-                }}
-              />
-            </div>
-
             {retryMessages && (
               <div
                 style={{
