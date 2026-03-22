@@ -1315,23 +1315,24 @@ export default function Home() {
       >
         <div
           style={{
-            padding: isMobile ? "12px 12px" : "14px 18px",
+            padding: isMobile ? "10px 12px" : "14px 18px",
             borderBottom: "1px solid #2f2f2f",
             background: "#212121",
             display: "flex",
+            alignItems: "center",
             justifyContent: "space-between",
-            alignItems: isMobile ? "flex-start" : "center",
             gap: 12,
-            flexDirection: isMobile ? "column" : "row"
+            minHeight: isMobile ? 64 : "auto"
           }}
         >
           <div
             style={{
               display: "flex",
-              gap: 10,
               alignItems: "center",
-              width: isMobile ? "100%" : "auto",
-              flexWrap: "wrap"
+              gap: 10,
+              minWidth: 0,
+              flex: 1,
+              overflow: "hidden"
             }}
           >
             <button
@@ -1343,7 +1344,8 @@ export default function Home() {
                 padding: 0,
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center"
+                justifyContent: "center",
+                flexShrink: 0
               }}
               onClick={() => setSidebarOpen(!sidebarOpen)}
               title="Toggle sidebar"
@@ -1351,7 +1353,14 @@ export default function Home() {
               <MenuIcon width={20} height={20} />
             </button>
 
-            <div style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700 }}>
+            <div
+              style={{
+                fontSize: isMobile ? 18 : 20,
+                fontWeight: 700,
+                whiteSpace: "nowrap",
+                flexShrink: 0
+              }}
+            >
               Nexa AI
             </div>
 
@@ -1363,7 +1372,10 @@ export default function Home() {
                 color: "white",
                 border: "1px solid #3a3a3a",
                 borderRadius: 8,
-                padding: "8px 10px"
+                padding: isMobile ? "7px 8px" : "8px 10px",
+                minWidth: isMobile ? 78 : 96,
+                maxWidth: isMobile ? 90 : 120,
+                flexShrink: 1
               }}
             >
               <option value="auto">Auto</option>
@@ -1376,7 +1388,7 @@ export default function Home() {
             ref={profileMenuRef}
             style={{
               position: "relative",
-              marginLeft: isMobile ? 0 : "auto"
+              flexShrink: 0
             }}
           >
             <button
@@ -1385,13 +1397,17 @@ export default function Home() {
                 ...primaryButtonStyle,
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
-                padding: "8px 10px"
+                justifyContent: "center",
+                gap: 6,
+                padding: isMobile ? "8px" : "8px 10px",
+                width: isMobile ? 42 : "auto",
+                minWidth: 42,
+                height: 42
               }}
               title="Profile"
             >
               <UserIcon width={18} height={18} />
-              <ChevronDownIcon width={16} height={16} />
+              {!isMobile && <ChevronDownIcon width={16} height={16} />}
             </button>
 
             {showProfileMenu && (
@@ -1400,7 +1416,8 @@ export default function Home() {
                   position: "absolute",
                   top: "calc(100% + 8px)",
                   right: 0,
-                  width: 240,
+                  width: isMobile ? 200 : 240,
+                  maxWidth: "calc(100vw - 24px)",
                   background: "#1f1f1f",
                   border: "1px solid #333",
                   borderRadius: 14,
@@ -1432,7 +1449,8 @@ export default function Home() {
                           fontSize: 14,
                           color: "white",
                           wordBreak: "break-word",
-                          fontWeight: 600
+                          fontWeight: 600,
+                          lineHeight: 1.35
                         }}
                       >
                         {userEmail || "Account"}
