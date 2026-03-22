@@ -187,6 +187,15 @@ function SparklesIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function PlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </IconBase>
+  );
+}
+
 function sanitizeTextForSpeech(text: string) {
   let clean = text;
 
@@ -240,6 +249,7 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedModel, setSelectedModel] = useState<SelectedModel>("auto");
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
 
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState("");
@@ -262,6 +272,7 @@ export default function Home() {
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const restartTimerRef = useRef<number | null>(null);
+  const mobileActionsRef = useRef<HTMLDivElement | null>(null);
 
   const loadingRef = useRef(false);
   const messagesRef = useRef<Msg[]>([]);
@@ -650,6 +661,13 @@ export default function Home() {
       ) {
         setShowProfileMenu(false);
       }
+
+      if (
+        mobileActionsRef.current &&
+        !mobileActionsRef.current.contains(event.target as Node)
+      ) {
+        setMobileActionsOpen(false);
+      }
     }
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -670,6 +688,12 @@ export default function Home() {
       scheduleHandsFreeRestart(300);
     }
   }, [handsFreeWakeMode]);
+
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileActionsOpen(false);
+    }
+  }, [isMobile]);
 
   useEffect(() => {
     return () => {
@@ -863,6 +887,7 @@ export default function Home() {
     try {
       recognitionRef.current.lang = voiceLanguage;
       recognitionRef.current.start();
+      setMobileActionsOpen(false);
     } catch {
       alert("Could not start microphone input.");
     }
@@ -870,6 +895,7 @@ export default function Home() {
 
   function toggleHandsFree() {
     setHandsFreeWakeMode((prev) => !prev);
+    if (isMobile) setMobileActionsOpen(false);
   }
 
   async function handleTranscript(transcript: string) {
@@ -985,6 +1011,7 @@ export default function Home() {
       setCameraError("");
       setCameraLoading(true);
       setCameraOpen(true);
+      setMobileActionsOpen(false);
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
@@ -1189,6 +1216,7 @@ export default function Home() {
     setLoading(true);
     loadingRef.current = true;
     stopListening();
+    setMobileActionsOpen(false);
 
     try {
       let workingMessages = customMessages ? [...customMessages] : [...messagesRef.current];
@@ -1441,6 +1469,7 @@ export default function Home() {
     activeChatIdRef.current = null;
     setSelectedFile(null);
     stopSpeaking();
+    setMobileActionsOpen(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -1581,6 +1610,19 @@ export default function Home() {
     fontSize: 12,
     width: "100%",
     marginBottom: 12
+  };
+
+  const mobileActionCardStyle: CSSProperties = {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    background: "#2b3445",
+    color: "white",
+    border: "1px solid #3b465a",
+    borderRadius: 12,
+    padding: "12px 14px",
+    cursor: "pointer"
   };
 
   const sidebarStyle: CSSProperties = {
@@ -1724,6 +1766,17 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
+      {isMobile && mobileActionsOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            zIndex: 45
+          }}
+        />
       )}
 
       {sidebarOpen && (
@@ -2601,7 +2654,8 @@ export default function Home() {
           <div
             style={{
               maxWidth: 860,
-              margin: "0 auto"
+              margin: "0 auto",
+              position: "relative"
             }}
           >
             {selectedFile && (
@@ -2674,171 +2728,202 @@ export default function Home() {
                   boxShadow: "0 10px 25px rgba(0,0,0,0.2)"
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    marginBottom: 8,
-                    overflowX: "auto",
-                    paddingBottom: 2
-                  }}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0] || null;
-                      setSelectedFile(file);
-                    }}
-                    style={{ display: "none" }}
-                  />
-
-                  <button
-                    type="button"
-                    style={iconButtonStyle}
-                    onClick={() => fileInputRef.current?.click()}
-                    title="Upload"
-                  >
-                    <PaperclipIcon width={18} height={18} />
-                  </button>
-
-                  <button
-                    type="button"
-                    style={{
-                      ...iconButtonStyle,
-                      background: isListening ? "#7c3aed" : "#2b3445",
-                      border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
-                    }}
-                    onClick={startMicOnce}
-                    title="Speak"
-                  >
-                    <MicIcon width={18} height={18} />
-                  </button>
-
-                  <button
-                    type="button"
-                    style={{
-                      ...iconButtonStyle,
-                      background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
-                      border: voiceAssistantOn
-                        ? "1px solid #2f7f64"
-                        : "1px solid #3b465a"
-                    }}
-                    onClick={() => {
-                      if (voiceAssistantOn) stopSpeaking();
-                      setVoiceAssistantOn((prev) => !prev);
-                    }}
-                    title={voiceAssistantOn ? "Voice on" : "Voice off"}
-                  >
-                    {voiceAssistantOn ? (
-                      <VolumeOnIcon width={18} height={18} />
-                    ) : (
-                      <VolumeOffIcon width={18} height={18} />
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    style={{
-                      ...iconButtonStyle,
-                      background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
-                      border: handsFreeWakeMode
-                        ? "1px solid #14b8a6"
-                        : "1px solid #3b465a"
-                    }}
-                    onClick={toggleHandsFree}
-                    title="Hands-free wake mode"
-                  >
-                    <SparklesIcon width={18} height={18} />
-                  </button>
-
-                  <button
-                    type="button"
-                    style={iconButtonStyle}
-                    onClick={openCamera}
-                    title="Camera"
-                  >
-                    <CameraIcon width={18} height={18} />
-                  </button>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-end",
-                    gap: 8
-                  }}
-                >
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        void submitCurrentInput();
-                      }
-                    }}
-                    rows={1}
-                    style={{
-                      flex: 1,
-                      padding: "12px 14px",
-                      background: "#1f1f1f",
-                      color: "white",
-                      border: "1px solid #383838",
-                      borderRadius: 14,
-                      outline: "none",
-                      resize: "none",
-                      minHeight: 48,
-                      maxHeight: 132,
-                      width: "100%",
-                      boxSizing: "border-box",
-                      lineHeight: 1.4,
-                      fontSize: 15
-                    }}
-                    placeholder={
-                      isListening
-                        ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
-                        : selectedFile
-                          ? "Ask about the file/photo..."
-                          : "Message Nexa AI"
-                    }
-                  />
-
-                  {loading ? (
-                    <button
-                      type="button"
+                <div ref={mobileActionsRef} style={{ position: "relative" }}>
+                  {mobileActionsOpen && (
+                    <div
                       style={{
-                        ...iconButtonStyle,
-                        background: "#4b1d1d",
-                        border: "1px solid #7a2d2d",
-                        width: 48,
-                        minWidth: 48,
-                        height: 48,
-                        minHeight: 48,
-                        borderRadius: 14
+                        position: "absolute",
+                        bottom: 60,
+                        left: 0,
+                        width: 220,
+                        background: "#1f1f1f",
+                        border: "1px solid #333",
+                        borderRadius: 16,
+                        padding: 10,
+                        boxShadow: "0 16px 40px rgba(0,0,0,0.4)",
+                        zIndex: 50,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8
                       }}
-                      onClick={stopGeneration}
-                      title="Stop"
                     >
-                      <StopIcon width={18} height={18} />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      style={{
-                        ...iconButtonStyle,
-                        width: 48,
-                        minWidth: 48,
-                        height: 48,
-                        minHeight: 48,
-                        borderRadius: 14
-                      }}
-                      onClick={() => void submitCurrentInput()}
-                      title="Send"
-                    >
-                      <SendIcon width={18} height={18} />
-                    </button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setSelectedFile(file);
+                          setMobileActionsOpen(false);
+                        }}
+                        style={{ display: "none" }}
+                      />
+
+                      <button
+                        type="button"
+                        style={mobileActionCardStyle}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <PaperclipIcon width={18} height={18} />
+                        <span>Upload file</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: isListening ? "#7c3aed" : "#2b3445",
+                          border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
+                        }}
+                        onClick={startMicOnce}
+                      >
+                        <MicIcon width={18} height={18} />
+                        <span>Speak</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
+                          border: voiceAssistantOn
+                            ? "1px solid #2f7f64"
+                            : "1px solid #3b465a"
+                        }}
+                        onClick={() => {
+                          if (voiceAssistantOn) stopSpeaking();
+                          setVoiceAssistantOn((prev) => !prev);
+                          setMobileActionsOpen(false);
+                        }}
+                      >
+                        {voiceAssistantOn ? (
+                          <VolumeOnIcon width={18} height={18} />
+                        ) : (
+                          <VolumeOffIcon width={18} height={18} />
+                        )}
+                        <span>{voiceAssistantOn ? "Voice on" : "Voice off"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
+                          border: handsFreeWakeMode
+                            ? "1px solid #14b8a6"
+                            : "1px solid #3b465a"
+                        }}
+                        onClick={toggleHandsFree}
+                      >
+                        <SparklesIcon width={18} height={18} />
+                        <span>{handsFreeWakeMode ? "Hands-free on" : "Hands-free off"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={mobileActionCardStyle}
+                        onClick={openCamera}
+                      >
+                        <CameraIcon width={18} height={18} />
+                        <span>Open camera</span>
+                      </button>
+                    </div>
                   )}
+
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-end",
+                      gap: 8
+                    }}
+                  >
+                    <button
+                      type="button"
+                      style={{
+                        ...iconButtonStyle,
+                        width: 48,
+                        minWidth: 48,
+                        height: 48,
+                        minHeight: 48,
+                        borderRadius: 14,
+                        background: mobileActionsOpen ? "#3b465a" : "#2b3445"
+                      }}
+                      onClick={() => setMobileActionsOpen((prev) => !prev)}
+                      title="More actions"
+                    >
+                      <PlusIcon width={18} height={18} />
+                    </button>
+
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void submitCurrentInput();
+                        }
+                      }}
+                      rows={1}
+                      style={{
+                        flex: 1,
+                        padding: "12px 14px",
+                        background: "#1f1f1f",
+                        color: "white",
+                        border: "1px solid #383838",
+                        borderRadius: 14,
+                        outline: "none",
+                        resize: "none",
+                        minHeight: 48,
+                        maxHeight: 132,
+                        width: "100%",
+                        boxSizing: "border-box",
+                        lineHeight: 1.4,
+                        fontSize: 15
+                      }}
+                      placeholder={
+                        isListening
+                          ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
+                          : selectedFile
+                            ? "Ask about the file/photo..."
+                            : "Message Nexa AI"
+                      }
+                    />
+
+                    {loading ? (
+                      <button
+                        type="button"
+                        style={{
+                          ...iconButtonStyle,
+                          background: "#4b1d1d",
+                          border: "1px solid #7a2d2d",
+                          width: 48,
+                          minWidth: 48,
+                          height: 48,
+                          minHeight: 48,
+                          borderRadius: 14
+                        }}
+                        onClick={stopGeneration}
+                        title="Stop"
+                      >
+                        <StopIcon width={18} height={18} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={{
+                          ...iconButtonStyle,
+                          width: 48,
+                          minWidth: 48,
+                          height: 48,
+                          minHeight: 48,
+                          borderRadius: 14
+                        }}
+                        onClick={() => void submitCurrentInput()}
+                        title="Send"
+                      >
+                        <SendIcon width={18} height={18} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
