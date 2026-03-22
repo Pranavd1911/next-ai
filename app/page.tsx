@@ -2648,7 +2648,9 @@ export default function Home() {
             borderTop: "1px solid #2f2f2f",
             background: "rgba(33,33,33,0.98)",
             backdropFilter: "blur(12px)",
-            padding: isMobile ? "10px 10px calc(10px + env(safe-area-inset-bottom)) 10px" : "16px 20px 20px 20px"
+            padding: isMobile ? "10px 10px calc(10px + env(safe-area-inset-bottom)) 10px" : "16px 20px 20px 20px",
+            position: "relative",
+            zIndex: isMobile && mobileActionsOpen ? 50 : 1
           }}
         >
           <div
