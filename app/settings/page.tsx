@@ -11,7 +11,9 @@ export default function SettingsPage() {
     dailyUsers: number;
     messagesPerUser: number;
     dropOffPoints: Array<{ createdAt: string; reason: string }>;
+    dailySeries: Array<{ date: string; users: number; messages: number }>;
   } | null>(null);
+  const [memoryItems, setMemoryItems] = useState<Array<{ id: string; content: string }>>([]);
 
   useEffect(() => {
     async function init() {
@@ -22,6 +24,19 @@ export default function SettingsPage() {
       setUserId(user?.id || null);
       setUserEmail(user?.email || null);
       try {
+        if (user?.id) {
+          const preferencesRes = await fetch(
+            `/api/preferences?${new URLSearchParams({
+              userId: user.id
+            }).toString()}`,
+            { cache: "no-store" }
+          );
+          const preferencesData = await preferencesRes.json();
+          if (preferencesRes.ok) {
+            setMemoryItems(preferencesData.memoryItems || []);
+          }
+        }
+
         const analyticsRes = await fetch("/api/analytics", { cache: "no-store" });
         const analyticsData = await analyticsRes.json();
         if (analyticsRes.ok) {
@@ -51,6 +66,23 @@ export default function SettingsPage() {
       window.location.href = "/";
     } catch {
       alert("Logout failed");
+    }
+  }
+
+  async function forgetMemoryItem(memoryId: string) {
+    if (!userId) return;
+
+    const params = new URLSearchParams({
+      userId,
+      memoryId
+    });
+
+    const res = await fetch(`/api/preferences?${params.toString()}`, {
+      method: "DELETE"
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setMemoryItems(data.memoryItems || []);
     }
   }
 
@@ -105,6 +137,14 @@ export default function SettingsPage() {
     marginBottom: 16,
     wordBreak: "break-word"
   };
+
+  const chartBarStyle = (value: number, color: string): React.CSSProperties => ({
+    width: 18,
+    borderRadius: 999,
+    background: color,
+    height: Math.max(8, value),
+    alignSelf: "end"
+  });
 
   return (
     <div style={pageStyle}>
@@ -180,6 +220,32 @@ export default function SettingsPage() {
               </div>
 
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+                7 day trend
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "flex-end",
+                  marginBottom: 20,
+                  minHeight: 180
+                }}
+              >
+                {analytics.dailySeries.map((point) => (
+                  <div key={point.date} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 140 }}>
+                      <div style={chartBarStyle(point.users * 18, "#46c2ff")} title={`Users: ${point.users}`} />
+                      <div style={chartBarStyle(point.messages * 10, "#73f0c6")} title={`Messages: ${point.messages}`} />
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9ca3af" }}>
+                      {new Date(point.date).toLocaleDateString(undefined, { weekday: "short" })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
                 Recent drop-off points
               </div>
 
@@ -195,6 +261,45 @@ export default function SettingsPage() {
                   </div>
                 ))
               )}
+            </div>
+          )}
+        </div>
+
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0, marginBottom: 16 }}>Remembered About You</h2>
+          {memoryItems.length === 0 ? (
+            <div style={{ color: "#cbd5e1" }}>
+              No saved memories yet. Tell Nexa things naturally in chat, like “I am a PM student”.
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {memoryItems.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "#2a2a2a",
+                    border: "1px solid #3a3a3a",
+                    borderRadius: 999,
+                    padding: "8px 12px"
+                  }}
+                >
+                  <span>{item.content}</span>
+                  <button
+                    onClick={() => void forgetMemoryItem(item.id)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#fca5a5",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Forget
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>

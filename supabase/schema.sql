@@ -13,6 +13,7 @@ create table if not exists messages (
   chat_id uuid not null references chats(id) on delete cascade,
   role text not null check (role in ('user','assistant')),
   content text not null,
+  metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -56,6 +57,20 @@ create table if not exists analytics_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists memory_items (
+  id uuid primary key default gen_random_uuid(),
+  owner_id text not null,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists rate_limit_events (
+  id uuid primary key default gen_random_uuid(),
+  owner_id text not null,
+  route text not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists messages_chat_id_created_at_idx
 on messages (chat_id, created_at);
 
@@ -64,6 +79,12 @@ on analytics_events (created_at);
 
 create index if not exists analytics_events_owner_id_idx
 on analytics_events (owner_id);
+
+create index if not exists memory_items_owner_id_idx
+on memory_items (owner_id, created_at desc);
+
+create index if not exists rate_limit_events_owner_route_created_at_idx
+on rate_limit_events (owner_id, route, created_at desc);
 
 alter table chats enable row level security;
 alter table messages enable row level security;

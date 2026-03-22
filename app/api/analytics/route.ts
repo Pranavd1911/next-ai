@@ -5,8 +5,11 @@ import { supabaseAdmin } from "@/lib/server-data";
 export async function GET() {
   try {
     const today = new Date().toISOString().slice(0, 10);
+    const sevenDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
-    const [{ data: dailyUsers }, { data: dailyMessages }, { data: events }] = await Promise.all([
+    const [{ data: dailyUsers }, { data: dailyMessages }, { data: events }, { data: sevenDayEvents }] = await Promise.all([
       supabaseAdmin
         .from("analytics_events")
         .select("owner_id")
@@ -22,7 +25,12 @@ export async function GET() {
         .select("event_name, metadata, created_at")
         .gte("created_at", `${today}T00:00:00.000Z`)
         .order("created_at", { ascending: false })
-        .limit(200)
+        .limit(200),
+      supabaseAdmin
+        .from("analytics_events")
+        .select("event_name, owner_id, created_at")
+        .gte("created_at", `${sevenDaysAgo}T00:00:00.000Z`)
+        .order("created_at", { ascending: true })
     ]);
 
     const uniqueUsers = new Set((dailyUsers || []).map((row) => row.owner_id)).size;
@@ -37,10 +45,33 @@ export async function GET() {
         reason: typeof event.metadata?.reason === "string" ? event.metadata.reason : "Unknown error"
       }));
 
+    const seriesMap = new Map<string, { date: string; users: Set<string>; messages: number }>();
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+      seriesMap.set(date, { date, users: new Set<string>(), messages: 0 });
+    }
+
+    for (const event of sevenDayEvents || []) {
+      const date = String(event.created_at).slice(0, 10);
+      const bucket = seriesMap.get(date);
+      if (!bucket) continue;
+      if (event.owner_id) bucket.users.add(event.owner_id);
+      if (event.event_name === "chat_success") bucket.messages += 1;
+    }
+
+    const dailySeries = Array.from(seriesMap.values()).map((bucket) => ({
+      date: bucket.date,
+      users: bucket.users.size,
+      messages: bucket.messages
+    }));
+
     return NextResponse.json({
       dailyUsers: uniqueUsers,
       messagesPerUser,
-      dropOffPoints
+      dropOffPoints,
+      dailySeries
     });
   } catch (error) {
     const friendly = getFriendlyApiError(error, "Failed to load analytics.");

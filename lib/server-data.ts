@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { ApiValidationError } from "@/lib/api-guards";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -12,6 +13,13 @@ export type UserPreferenceRecord = {
   web_search_enabled: boolean;
   code_mode_enabled: boolean;
   updated_at?: string;
+};
+
+export type MemoryItemRecord = {
+  id: string;
+  owner_id: string;
+  content: string;
+  created_at: string;
 };
 
 export async function getUserPreferences(ownerId: string) {
@@ -32,6 +40,107 @@ export async function getUserPreferences(ownerId: string) {
       code_mode_enabled: false
     }
   );
+}
+
+export async function getMemoryItems(ownerId: string) {
+  const { data } = await supabaseAdmin
+    .from("memory_items")
+    .select("id, owner_id, content, created_at")
+    .eq("owner_id", ownerId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  return (data || []) as MemoryItemRecord[];
+}
+
+export async function syncPreferenceMemory(ownerId: string) {
+  const memoryItems = await getMemoryItems(ownerId);
+  const memory = memoryItems
+    .map((item) => item.content.trim())
+    .filter(Boolean)
+    .reverse()
+    .join("\n")
+    .slice(0, 2000);
+
+  const existing = await getUserPreferences(ownerId);
+
+  await supabaseAdmin.from("user_preferences").upsert({
+    owner_id: ownerId,
+    memory,
+    prefers_direct_answers: existing.prefers_direct_answers,
+    web_search_enabled: existing.web_search_enabled,
+    code_mode_enabled: existing.code_mode_enabled,
+    updated_at: new Date().toISOString()
+  });
+
+  return memory;
+}
+
+export async function createMemoryItem(ownerId: string, content: string) {
+  const normalized = content.trim().replace(/\s+/g, " ").slice(0, 220);
+  if (!normalized) return null;
+
+  const { data: existing } = await supabaseAdmin
+    .from("memory_items")
+    .select("id, owner_id, content, created_at")
+    .eq("owner_id", ownerId)
+    .ilike("content", normalized)
+    .maybeSingle();
+
+  if (existing) {
+    return existing as MemoryItemRecord;
+  }
+
+  const { data } = await supabaseAdmin
+    .from("memory_items")
+    .insert({
+      owner_id: ownerId,
+      content: normalized
+    })
+    .select("id, owner_id, content, created_at")
+    .single();
+
+  await syncPreferenceMemory(ownerId);
+  return (data as MemoryItemRecord | null) || null;
+}
+
+export async function deleteMemoryItem(ownerId: string, memoryId: string) {
+  await supabaseAdmin
+    .from("memory_items")
+    .delete()
+    .eq("owner_id", ownerId)
+    .eq("id", memoryId);
+
+  await syncPreferenceMemory(ownerId);
+}
+
+export async function enforceDistributedRateLimit(params: {
+  ownerId: string;
+  route: string;
+  limit: number;
+  windowSeconds: number;
+}) {
+  const cutoff = new Date(Date.now() - params.windowSeconds * 1000).toISOString();
+
+  const { data: existing } = await supabaseAdmin
+    .from("rate_limit_events")
+    .select("id")
+    .eq("owner_id", params.ownerId)
+    .eq("route", params.route)
+    .gte("created_at", cutoff)
+    .limit(params.limit);
+
+  if ((existing || []).length >= params.limit) {
+    throw new ApiValidationError(
+      "Too many requests. Please slow down and try again.",
+      429
+    );
+  }
+
+  await supabaseAdmin.from("rate_limit_events").insert({
+    owner_id: params.ownerId,
+    route: params.route
+  });
 }
 
 export async function trackAnalyticsEvent(params: {

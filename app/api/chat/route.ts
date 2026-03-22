@@ -12,7 +12,12 @@ import {
   validateMode,
   validateModel
 } from "@/lib/api-guards";
-import { getUserPreferences, trackAnalyticsEvent } from "@/lib/server-data";
+import {
+  createMemoryItem,
+  enforceDistributedRateLimit,
+  getUserPreferences,
+  trackAnalyticsEvent
+} from "@/lib/server-data";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -400,33 +405,9 @@ function extractRememberableMemory(message: string) {
 async function rememberUserContext(ownerId: string, latestUserMessage: string) {
   const memoryCandidate = extractRememberableMemory(latestUserMessage);
   if (!memoryCandidate) return null;
-
-  const existing = await getUserPreferences(ownerId);
-  const lines = existing.memory
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const alreadySaved = lines.some(
-    (line) => line.toLowerCase() === memoryCandidate.toLowerCase()
-  );
-
-  if (alreadySaved) {
-    return existing.memory;
-  }
-
-  const nextMemory = [...lines, memoryCandidate].join("\n").slice(0, 2000);
-
-  await supabaseAdmin.from("user_preferences").upsert({
-    owner_id: ownerId,
-    memory: nextMemory,
-    prefers_direct_answers: existing.prefers_direct_answers,
-    web_search_enabled: existing.web_search_enabled,
-    code_mode_enabled: existing.code_mode_enabled,
-    updated_at: new Date().toISOString()
-  });
-
-  return nextMemory;
+  const savedItem = await createMemoryItem(ownerId, memoryCandidate);
+  const updatedPreferences = await getUserPreferences(ownerId);
+  return savedItem ? updatedPreferences.memory : updatedPreferences.memory;
 }
 
 async function ensureChatOwnership(
@@ -511,15 +492,42 @@ async function saveUserMessageIfNeeded(
 
 async function saveAssistantMessage(
   activeChatId: string,
-  assistantReply: string
+  assistantReply: string,
+  metadata?: Record<string, unknown>
 ) {
   if (!assistantReply.trim()) return;
 
   await supabaseAdmin.from("messages").insert({
     chat_id: activeChatId,
     role: "assistant",
-    content: assistantReply
+    content: assistantReply,
+    metadata: metadata || {}
   });
+}
+
+function extractWebSourcesFromResponse(finalResponse: any) {
+  const sources: Array<{ title: string; url: string }> = [];
+  const outputItems = Array.isArray(finalResponse?.output) ? finalResponse.output : [];
+
+  for (const item of outputItems) {
+    if (item?.type !== "web_search_call") continue;
+    const itemSources = item?.action?.sources;
+    if (!Array.isArray(itemSources)) continue;
+
+    for (const source of itemSources) {
+      const title =
+        typeof source?.title === "string" && source.title.trim().length > 0
+          ? source.title.trim()
+          : "Source";
+      const url = typeof source?.url === "string" ? source.url : "";
+
+      if (!url) continue;
+      if (sources.some((existing) => existing.url === url)) continue;
+      sources.push({ title, url });
+    }
+  }
+
+  return sources.slice(0, 6);
 }
 
 function createSseEvent(type: string, data: Record<string, unknown>) {
@@ -561,6 +569,12 @@ export async function POST(req: Request) {
       key: `chat:${ownerId}`,
       limit: 10,
       windowMs: 60_000
+    });
+    await enforceDistributedRateLimit({
+      ownerId,
+      route: "chat",
+      limit: 12,
+      windowSeconds: 60
     });
 
     await incrementChatUsage(ownerId);
@@ -683,7 +697,10 @@ export async function POST(req: Request) {
           .join("")
           .trim() || "No response.";
 
-      await saveAssistantMessage(activeChatId, assistantReply);
+      await saveAssistantMessage(activeChatId, assistantReply, {
+        agentProfile,
+        sources: []
+      });
       await trackAnalyticsEvent({
         ownerId,
         eventName: "chat_success",
@@ -699,7 +716,9 @@ export async function POST(req: Request) {
         {
           reply: assistantReply,
           chatId: activeChatId,
-          rememberedMemory: effectiveMemory
+          rememberedMemory: effectiveMemory,
+          agentProfile,
+          sources: []
         },
         {
           headers: {
@@ -712,7 +731,7 @@ export async function POST(req: Request) {
     const useLiveWeb = effectiveWebSearch && shouldUseLiveWebSearch(latestUserMessage);
     const encoder = new TextEncoder();
 
-    const responseStream = await openai.responses.create(
+    const responseStream = openai.responses.stream(
       {
         model: "gpt-4.1-mini",
         input:
@@ -723,6 +742,7 @@ export async function POST(req: Request) {
                 systemPrompt
               }) as any
             : buildOpenAIInput(normalizedMessages, systemPrompt),
+        include: useLiveWeb ? ["web_search_call.action.sources"] : [],
         tools: useLiveWeb ? [{ type: "web_search_preview" }] : [],
         stream: true
       },
@@ -732,6 +752,7 @@ export async function POST(req: Request) {
     );
 
     let assistantReply = "";
+    let sources: Array<{ title: string; url: string }> = [];
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -758,8 +779,14 @@ export async function POST(req: Request) {
             }
           }
 
+          const finalResponse = await responseStream.finalResponse();
+          sources = extractWebSourcesFromResponse(finalResponse);
+
           const finalReply = assistantReply.trim() || "No response.";
-          await saveAssistantMessage(activeChatId, finalReply);
+          await saveAssistantMessage(activeChatId, finalReply, {
+            agentProfile,
+            sources
+          });
           await trackAnalyticsEvent({
             ownerId,
             eventName: "chat_success",
@@ -767,7 +794,8 @@ export async function POST(req: Request) {
             metadata: {
               model: validatedModel,
               mode: validatedMode,
-              liveDataUsed: useLiveWeb
+              liveDataUsed: useLiveWeb,
+              sourcesCount: sources.length
             }
           });
 
@@ -778,7 +806,8 @@ export async function POST(req: Request) {
                 chatId: activeChatId,
                 liveDataUsed: useLiveWeb,
                 rememberedMemory: effectiveMemory,
-                agentProfile
+                agentProfile,
+                sources
               })
             )
           );

@@ -44,7 +44,7 @@ export async function GET(req: Request) {
 
     const { data, error } = await supabase
       .from("messages")
-      .select("role, content, created_at")
+      .select("role, content, metadata, created_at")
       .eq("chat_id", chatId)
       .order("created_at", { ascending: true });
 

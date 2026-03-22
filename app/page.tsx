@@ -27,6 +27,10 @@ declare global {
 type Msg = {
   role: string;
   content: string;
+  metadata?: {
+    agentProfile?: string;
+    sources?: Array<{ title: string; url: string }>;
+  };
 };
 
 type ToastItem = {
@@ -36,9 +40,9 @@ type ToastItem = {
 };
 
 type StreamChunkEvent =
-  | { type: "meta"; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string; agentProfile?: string }
+  | { type: "meta"; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string; agentProfile?: string; sources?: Array<{ title: string; url: string }> }
   | { type: "delta"; delta?: string }
-  | { type: "done"; reply?: string; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string; agentProfile?: string }
+  | { type: "done"; reply?: string; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string; agentProfile?: string; sources?: Array<{ title: string; url: string }> }
   | { type: "error"; error?: string };
 
 type ChatItem = {
@@ -373,9 +377,21 @@ export default function Home() {
     let streamedReply = "";
     let finalChatId = currentChatId;
     let liveDataUsed = false;
+    let finalAgentProfile: string | undefined;
+    let finalSources: Array<{ title: string; url: string }> = [];
 
     const applyAssistantText = (text: string) => {
-      const updated = [...nextMessages, { role: "assistant", content: text }];
+      const updated = [
+        ...nextMessages,
+        {
+          role: "assistant",
+          content: text,
+          metadata: {
+            agentProfile: finalAgentProfile,
+            sources: finalSources
+          }
+        }
+      ];
       setMessages(updated);
       messagesRef.current = updated;
     };
@@ -405,6 +421,8 @@ export default function Home() {
         if (typeof metaPayload.rememberedMemory === "string") {
           setRememberedMemory(metaPayload.rememberedMemory);
         }
+        finalAgentProfile = metaPayload.agentProfile;
+        finalSources = Array.isArray(metaPayload.sources) ? metaPayload.sources : [];
         setActiveAgentLabel(getAgentLabel(metaPayload.agentProfile));
         return;
       }
@@ -433,6 +451,8 @@ export default function Home() {
         if (typeof donePayload.rememberedMemory === "string") {
           setRememberedMemory(donePayload.rememberedMemory);
         }
+        finalAgentProfile = donePayload.agentProfile;
+        finalSources = Array.isArray(donePayload.sources) ? donePayload.sources : [];
         setActiveAgentLabel(getAgentLabel(donePayload.agentProfile));
         applyAssistantText(streamedReply);
       }
@@ -726,7 +746,8 @@ export default function Home() {
       if (Array.isArray(data)) {
         const loadedMessages = data.map((m: any) => ({
           role: m.role,
-          content: m.content
+          content: m.content,
+          metadata: m.metadata || undefined
         }));
         setMessages(loadedMessages);
         messagesRef.current = loadedMessages;
@@ -1598,7 +1619,10 @@ export default function Home() {
             errorMessage = errorData?.error || errorMessage;
           } catch {}
 
-          const updated = [...nextMessages, { role: "assistant", content: errorMessage }];
+          const updated = [
+            ...nextMessages,
+            { role: "assistant", content: errorMessage, metadata: { sources: [] } }
+          ];
           setMessages(updated);
           messagesRef.current = updated;
           await loadHistory();
@@ -1609,7 +1633,14 @@ export default function Home() {
         const imageReply = imageData.url || imageData.error || "...";
         const newChatId = imageData.chatId || currentChatId || activeChatIdRef.current || null;
 
-        const updated = [...nextMessages, { role: "assistant", content: imageReply }];
+        const updated = [
+          ...nextMessages,
+          {
+            role: "assistant",
+            content: imageReply,
+            metadata: { agentProfile: "image", sources: [] }
+          }
+        ];
         setMessages(updated);
         messagesRef.current = updated;
 
@@ -1676,7 +1707,17 @@ export default function Home() {
         activeChatIdRef.current = returnedChatId;
       }
 
-      const updated = [...nextMessages, { role: "assistant", content: assistantReply }];
+      const updated = [
+        ...nextMessages,
+        {
+          role: "assistant",
+          content: assistantReply,
+          metadata: {
+            agentProfile: data?.agentProfile,
+            sources: Array.isArray(data?.sources) ? data.sources : []
+          }
+        }
+      ];
       setMessages(updated);
       messagesRef.current = updated;
 
@@ -1708,7 +1749,8 @@ export default function Home() {
         ...messagesRef.current,
         {
           role: "assistant",
-          content: friendlyMessage
+          content: friendlyMessage,
+          metadata: { sources: [] }
         }
       ];
       setMessages(updated);
@@ -3083,6 +3125,25 @@ export default function Home() {
                             flexWrap: "wrap"
                           }}
                         >
+                          {Array.isArray(m.metadata?.sources) &&
+                            m.metadata!.sources!.length > 0 &&
+                            m.metadata!.sources!.map((source) => (
+                              <a
+                                key={source.url}
+                                href={source.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  ...smallButtonStyle,
+                                  textDecoration: "none",
+                                  display: "inline-flex",
+                                  alignItems: "center"
+                                }}
+                              >
+                                Source: {source.title}
+                              </a>
+                            ))}
+
                           <button
                             style={smallButtonStyle}
                             onClick={() => copyText(m.content)}
