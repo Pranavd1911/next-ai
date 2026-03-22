@@ -12,6 +12,13 @@ import ReactMarkdown from "react-markdown";
 import { getGuestId } from "@/lib/guest";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 
+declare global {
+  interface Window {
+    webkitSpeechRecognition?: any;
+    SpeechRecognition?: any;
+  }
+}
+
 type Msg = {
   role: string;
   content: string;
@@ -36,6 +43,21 @@ type ParsedFileMessage = {
 
 type SelectedModel = "auto" | "openai" | "claude";
 type ResolvedRoute = "openai" | "claude" | "image";
+
+type VoiceOption = {
+  name: string;
+  lang: string;
+  voiceURI: string;
+};
+
+type VoiceLanguage =
+  | "en-US"
+  | "en-IN"
+  | "hi-IN"
+  | "te-IN"
+  | "ta-IN"
+  | "kn-IN"
+  | "ja-JP";
 
 function IconBase(props: SVGProps<SVGSVGElement>) {
   return (
@@ -98,6 +120,17 @@ function CameraIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function MicIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <path d="M12 19v3" />
+      <path d="M8 22h8" />
+    </IconBase>
+  );
+}
+
 function SettingsIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <IconBase {...props}>
@@ -124,6 +157,75 @@ function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function VolumeOnIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M17.8 6.2a8.5 8.5 0 0 1 0 11.6" />
+    </IconBase>
+  );
+}
+
+function VolumeOffIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+      <path d="m16 9 5 5" />
+      <path d="m21 9-5 5" />
+    </IconBase>
+  );
+}
+
+function SparklesIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="m12 3 1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3Z" />
+      <path d="M5 16l.9 2.1L8 19l-2.1.9L5 22l-.9-2.1L2 19l2.1-.9L5 16Z" />
+      <path d="M19 14l1.2 2.8L23 18l-2.8 1.2L19 22l-1.2-2.8L15 18l2.8-1.2L19 14Z" />
+    </IconBase>
+  );
+}
+
+function sanitizeTextForSpeech(text: string) {
+  let clean = text;
+
+  while (clean.includes("```")) {
+    const start = clean.indexOf("```");
+    const end = clean.indexOf("```", start + 3);
+    if (end === -1) {
+      clean = clean.slice(0, start) + " code block omitted ";
+      break;
+    }
+    clean = clean.slice(0, start) + " code block omitted " + clean.slice(end + 3);
+  }
+
+  clean = clean.replaceAll("`", "");
+  clean = clean.replaceAll("#", " ");
+  clean = clean.replaceAll("*", " ");
+  clean = clean.replaceAll("_", " ");
+  clean = clean.replaceAll(">", " ");
+  clean = clean.replaceAll("[", " ");
+  clean = clean.replaceAll("]", " ");
+  clean = clean.replaceAll("(", " ");
+  clean = clean.replaceAll(")", " ");
+
+  return clean.replace(/\s+/g, " ").trim();
+}
+
+function getLanguageLabel(lang: VoiceLanguage) {
+  const labels: Record<VoiceLanguage, string> = {
+    "en-US": "English (US)",
+    "en-IN": "English (India)",
+    "hi-IN": "Hindi",
+    "te-IN": "Telugu",
+    "ta-IN": "Tamil",
+    "kn-IN": "Kannada",
+    "ja-JP": "Japanese"
+  };
+  return labels[lang];
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -143,19 +245,182 @@ export default function Home() {
   const [cameraError, setCameraError] = useState("");
   const [cameraLoading, setCameraLoading] = useState(false);
 
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceAssistantOn, setVoiceAssistantOn] = useState(true);
+  const [handsFreeWakeMode, setHandsFreeWakeMode] = useState(false);
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>("en-US");
+  const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
+  const [voiceStatus, setVoiceStatus] = useState("Wake phrase: Hey Nexa");
+
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const restartTimerRef = useRef<number | null>(null);
+
+  const loadingRef = useRef(false);
+  const messagesRef = useRef<Msg[]>([]);
+  const activeChatIdRef = useRef<string | null>(null);
+  const handsFreeRef = useRef(false);
+  const voiceAssistantRef = useRef(true);
+  const isSpeakingRef = useRef(false);
+  const manualMicModeRef = useRef(false);
+  const userStoppedRef = useRef(false);
 
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
 
-  async function migrateGuestChats(
-    currentGuestId: string,
-    currentUserId: string
-  ) {
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
+  useEffect(() => {
+    handsFreeRef.current = handsFreeWakeMode;
+  }, [handsFreeWakeMode]);
+
+  useEffect(() => {
+    voiceAssistantRef.current = voiceAssistantOn;
+  }, [voiceAssistantOn]);
+
+  const filteredVoices = useMemo(() => {
+    const exact = availableVoices.filter((v) => v.lang === voiceLanguage);
+    if (exact.length > 0) return exact;
+    const prefix = voiceLanguage.split("-")[0];
+    return availableVoices.filter((v) =>
+      v.lang.toLowerCase().startsWith(prefix.toLowerCase())
+    );
+  }, [availableVoices, voiceLanguage]);
+
+  function clearRestartTimer() {
+    if (restartTimerRef.current) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  }
+
+  function scheduleHandsFreeRestart(delay = 700) {
+    clearRestartTimer();
+
+    if (!handsFreeRef.current) return;
+    if (loadingRef.current) return;
+    if (isSpeakingRef.current) return;
+    if (userStoppedRef.current) return;
+
+    restartTimerRef.current = window.setTimeout(() => {
+      if (!handsFreeRef.current) return;
+      if (loadingRef.current) return;
+      if (isSpeakingRef.current) return;
+      if (userStoppedRef.current) return;
+
+      try {
+        manualMicModeRef.current = false;
+        recognitionRef.current?.start();
+      } catch {}
+    }, delay);
+  }
+
+  function stopListening() {
+    clearRestartTimer();
+    try {
+      recognitionRef.current?.stop();
+    } catch {}
+    setIsListening(false);
+  }
+
+  function stopSpeaking() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    isSpeakingRef.current = false;
+  }
+
+  function speakText(text: string) {
+    if (!voiceAssistantRef.current) {
+      scheduleHandsFreeRestart(600);
+      return;
+    }
+
+    if (typeof window === "undefined") {
+      scheduleHandsFreeRestart(600);
+      return;
+    }
+
+    if (!("speechSynthesis" in window)) {
+      scheduleHandsFreeRestart(600);
+      return;
+    }
+
+    const clean = sanitizeTextForSpeech(text);
+    if (!clean) {
+      scheduleHandsFreeRestart(600);
+      return;
+    }
+
+    stopListening();
+    stopSpeaking();
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = voiceLanguage;
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    if (selectedVoiceURI) {
+      const voice = window.speechSynthesis
+        .getVoices()
+        .find((v) => v.voiceURI === selectedVoiceURI);
+
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang || voiceLanguage;
+      }
+    }
+
+    utterance.onstart = () => {
+      isSpeakingRef.current = true;
+      setVoiceStatus("Speaking...");
+    };
+
+    utterance.onend = () => {
+      isSpeakingRef.current = false;
+      setVoiceStatus("Wake phrase: Hey Nexa");
+      scheduleHandsFreeRestart(600);
+    };
+
+    utterance.onerror = () => {
+      isSpeakingRef.current = false;
+      setVoiceStatus("Wake phrase: Hey Nexa");
+      scheduleHandsFreeRestart(600);
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function refreshVoices() {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    const voices = window.speechSynthesis.getVoices() || [];
+    const mapped: VoiceOption[] = voices.map((voice) => ({
+      name: voice.name,
+      lang: voice.lang,
+      voiceURI: voice.voiceURI
+    }));
+
+    setAvailableVoices(mapped);
+  }
+
+  async function migrateGuestChats(currentGuestId: string, currentUserId: string) {
     try {
       await fetch("/api/migrate-guest", {
         method: "POST",
@@ -174,11 +439,9 @@ export default function Home() {
     const actualUserId = currentUserIdArg ?? userId;
     const params = new URLSearchParams();
 
-    if (actualUserId) {
-      params.set("userId", actualUserId);
-    } else if (guestId) {
-      params.set("guestId", guestId);
-    } else {
+    if (actualUserId) params.set("userId", actualUserId);
+    else if (guestId) params.set("guestId", guestId);
+    else {
       setHistory([]);
       return;
     }
@@ -203,17 +466,16 @@ export default function Home() {
     const data = await res.json();
 
     if (Array.isArray(data)) {
-      setMessages(
-        data.map((m: any) => ({
-          role: m.role,
-          content: m.content
-        }))
-      );
+      const loadedMessages = data.map((m: any) => ({
+        role: m.role,
+        content: m.content
+      }));
+      setMessages(loadedMessages);
+      messagesRef.current = loadedMessages;
       setActiveChatId(chatId);
+      activeChatIdRef.current = chatId;
 
-      if (isMobile) {
-        setSidebarOpen(false);
-      }
+      if (isMobile) setSidebarOpen(false);
     }
   }
 
@@ -252,7 +514,9 @@ export default function Home() {
 
       if (!currentUserId) {
         setActiveChatId(null);
+        activeChatIdRef.current = null;
         setMessages([]);
+        messagesRef.current = [];
       }
 
       await loadHistory(currentUserId);
@@ -265,27 +529,118 @@ export default function Home() {
     function handleResize() {
       const mobile = window.innerWidth < 900;
       setIsMobile(mobile);
-
       if (mobile) setSidebarOpen(false);
       else setSidebarOpen(true);
     }
 
     handleResize();
     window.addEventListener("resize", handleResize);
-
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (typeof window === "undefined") return;
+
+    const SpeechRecognitionCtor =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    setSpeechSupported(!!SpeechRecognitionCtor);
+    if (!SpeechRecognitionCtor) return;
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = voiceLanguage;
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setVoiceStatus(
+        handsFreeRef.current
+          ? `Hands-free listening in ${getLanguageLabel(voiceLanguage)}`
+          : `Listening in ${getLanguageLabel(voiceLanguage)}`
+      );
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+
+      if (manualMicModeRef.current) {
+        manualMicModeRef.current = false;
+        if (!handsFreeRef.current) {
+          setVoiceStatus("Wake phrase: Hey Nexa");
+        }
+        return;
+      }
+
+      if (handsFreeRef.current) {
+        scheduleHandsFreeRestart(700);
+      } else {
+        setVoiceStatus("Wake phrase: Hey Nexa");
+      }
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+
+      if (manualMicModeRef.current) {
+        manualMicModeRef.current = false;
+        if (!handsFreeRef.current) {
+          setVoiceStatus("Mic stopped");
+        }
+        return;
+      }
+
+      if (handsFreeRef.current) {
+        setVoiceStatus("Hands-free retrying...");
+        scheduleHandsFreeRestart(1200);
+      } else {
+        setVoiceStatus("Mic stopped");
+      }
+    };
+
+    recognition.onresult = async (event: any) => {
+      const result = event?.results?.[event.results.length - 1]?.[0];
+      const transcript = result?.transcript || "";
+      await handleTranscript(transcript);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      try {
+        recognition.stop();
+      } catch {}
+    };
+  }, [voiceLanguage]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!("speechSynthesis" in window)) return;
+
+    refreshVoices();
+
+    const handler = () => refreshVoices();
+    window.speechSynthesis.onvoiceschanged = handler;
+
     return () => {
-      stopCamera();
-      stopGeneration();
+      if (window.speechSynthesis.onvoiceschanged === handler) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
     };
   }, []);
+
+  useEffect(() => {
+    if (filteredVoices.length === 0) return;
+
+    const exists = filteredVoices.some((v) => v.voiceURI === selectedVoiceURI);
+    if (!exists) {
+      setSelectedVoiceURI(filteredVoices[0].voiceURI);
+    }
+  }, [filteredVoices, selectedVoiceURI]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -299,6 +654,31 @@ export default function Home() {
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!handsFreeWakeMode) {
+      userStoppedRef.current = false;
+      clearRestartTimer();
+      stopListening();
+      setVoiceStatus("Wake phrase: Hey Nexa");
+      return;
+    }
+
+    userStoppedRef.current = false;
+    if (!loadingRef.current && !isSpeakingRef.current) {
+      scheduleHandsFreeRestart(300);
+    }
+  }, [handsFreeWakeMode]);
+
+  useEffect(() => {
+    return () => {
+      stopCamera();
+      stopGeneration();
+      stopSpeaking();
+      clearRestartTimer();
+      stopListening();
+    };
   }, []);
 
   const filteredHistory = useMemo(() => {
@@ -359,7 +739,6 @@ export default function Home() {
             `File name: ${parsed.fileName}`,
             `File type: ${parsed.mimeType}`,
             "Use the extracted file content below to answer the user's next question.",
-            'If the user asks to summarize or explain the file, use this text.',
             "",
             "BEGIN FILE CONTENT",
             shorterText,
@@ -374,8 +753,6 @@ export default function Home() {
           "The user uploaded a file.",
           `File name: ${parsed.fileName}`,
           `File type: ${parsed.mimeType}`,
-          "No text could be extracted from this file.",
-          "If asked about this file, explain that the file may be scanned or image-based.",
           `File URL: ${parsed.fileUrl}`
         ].join("\n")
       };
@@ -433,14 +810,8 @@ export default function Home() {
       "login page"
     ];
 
-    if (imageKeywords.some((k) => inputText.includes(k))) {
-      return "image";
-    }
-
-    if (codingKeywords.some((k) => inputText.includes(k))) {
-      return "claude";
-    }
-
+    if (imageKeywords.some((k) => inputText.includes(k))) return "image";
+    if (codingKeywords.some((k) => inputText.includes(k))) return "claude";
     return "openai";
   }
 
@@ -448,94 +819,6 @@ export default function Home() {
     if (selectedModel === "openai") return "openai";
     if (selectedModel === "claude") return "claude";
     return detectIntent(text);
-  }
-
-  async function streamAssistantReply(nextMessages: Msg[], response: Response) {
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-
-    if (!reader) {
-      throw new Error("No response body found.");
-    }
-
-    let accumulated = "";
-    setMessages([...nextMessages, { role: "assistant", content: "" }]);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      accumulated += decoder.decode(value, { stream: true });
-      setMessages([...nextMessages, { role: "assistant", content: accumulated }]);
-    }
-  }
-
-  async function fileToDataUrl(file: File): Promise<string> {
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-
-      reader.onload = () => {
-        if (typeof reader.result === "string") resolve(reader.result);
-        else reject(new Error("Failed to read file."));
-      };
-
-      reader.onerror = () => reject(new Error("Failed to read file."));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function buildOcrImageDataUrls(file: File): Promise<string[]> {
-    const name = file.name.toLowerCase();
-    const type = file.type || "";
-
-    if (type.startsWith("image/")) {
-      const dataUrl = await fileToDataUrl(file);
-      return [dataUrl];
-    }
-
-    if (type === "application/pdf" || name.endsWith(".pdf")) {
-      try {
-        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-
-        (pdfjsLib as any).GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${
-          (pdfjsLib as any).version
-        }/legacy/build/pdf.worker.min.mjs`;
-
-        const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = (pdfjsLib as any).getDocument({ data: arrayBuffer });
-        const pdf = await loadingTask.promise;
-
-        const maxPages = Math.min(pdf.numPages, 2);
-        const images: string[] = [];
-
-        for (let i = 1; i <= maxPages; i++) {
-          const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 1.5 });
-
-          const canvas = document.createElement("canvas");
-          const context = canvas.getContext("2d");
-
-          if (!context) continue;
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({
-            canvasContext: context,
-            viewport
-          }).promise;
-
-          images.push(canvas.toDataURL("image/png"));
-        }
-
-        return images;
-      } catch (error) {
-        console.error("PDF image generation failed:", error);
-        return [];
-      }
-    }
-
-    return [];
   }
 
   function stopCamera() {
@@ -551,6 +834,139 @@ export default function Home() {
       abortControllerRef.current = null;
     }
     setLoading(false);
+    loadingRef.current = false;
+  }
+
+  async function submitCurrentInput() {
+    if (loadingRef.current) return;
+    if (!input.trim() && !selectedFile) return;
+    await sendMessage();
+  }
+
+  function startMicOnce() {
+    if (!recognitionRef.current) {
+      alert("Speech input is not supported in this browser.");
+      return;
+    }
+
+    clearRestartTimer();
+    userStoppedRef.current = false;
+    manualMicModeRef.current = true;
+
+    if (loadingRef.current) {
+      alert("Please wait for the current answer to finish.");
+      return;
+    }
+
+    stopSpeaking();
+
+    try {
+      recognitionRef.current.lang = voiceLanguage;
+      recognitionRef.current.start();
+    } catch {
+      alert("Could not start microphone input.");
+    }
+  }
+
+  function toggleHandsFree() {
+    setHandsFreeWakeMode((prev) => !prev);
+  }
+
+  async function handleTranscript(transcript: string) {
+    const spoken = transcript.trim();
+    if (!spoken) return;
+
+    const normalized = spoken.toLowerCase().trim();
+
+    const stopCommands = [
+      "stop generating",
+      "stop generation",
+      "stop",
+      "cancel",
+      "cancel it"
+    ];
+
+    if (loadingRef.current && stopCommands.some((cmd) => normalized.includes(cmd))) {
+      setVoiceStatus("Stopping current response...");
+      stopGeneration();
+      scheduleHandsFreeRestart(700);
+      return;
+    }
+
+    if (loadingRef.current) {
+      setVoiceStatus("Please wait for the current answer to finish.");
+      return;
+    }
+
+    const wakePhrases = ["hey nexa", "hi nexa", "hello nexa", "hey nexus"];
+    const matchedWake = wakePhrases.find((phrase) => normalized.startsWith(phrase));
+
+    if (handsFreeRef.current) {
+      const finalSpoken = matchedWake
+        ? spoken.slice(matchedWake.length).trim().replace(/^[:,.\-]\s*/, "")
+        : spoken;
+
+      if (!finalSpoken) {
+        setVoiceStatus("Wake phrase detected. Waiting for your question.");
+        speakText("Yes, how can I help you?");
+        return;
+      }
+
+      setVoiceStatus(`Auto-sending: ${finalSpoken}`);
+      stopListening();
+
+      const nextMessages = [...messagesRef.current, { role: "user", content: finalSpoken }];
+      setInput("");
+      setMessages(nextMessages);
+      messagesRef.current = nextMessages;
+
+      await sendMessage(nextMessages);
+      return;
+    }
+
+    if (manualMicModeRef.current) {
+      const finalSpoken = matchedWake
+        ? spoken.slice(matchedWake.length).trim().replace(/^[:,.\-]\s*/, "")
+        : spoken;
+
+      if (!finalSpoken) {
+        setVoiceStatus("No question detected.");
+        manualMicModeRef.current = false;
+        return;
+      }
+
+      setVoiceStatus(`Auto-sending: ${finalSpoken}`);
+      stopListening();
+
+      const nextMessages = [...messagesRef.current, { role: "user", content: finalSpoken }];
+      setInput("");
+      setMessages(nextMessages);
+      messagesRef.current = nextMessages;
+
+      manualMicModeRef.current = false;
+      await sendMessage(nextMessages);
+      return;
+    }
+
+    if (matchedWake) {
+      const spokenAfterWake = spoken
+        .slice(matchedWake.length)
+        .trim()
+        .replace(/^[:,.\-]\s*/, "");
+
+      if (!spokenAfterWake) {
+        setVoiceStatus("Wake phrase detected. Say your request.");
+        speakText("Yes, how can I help you?");
+        return;
+      }
+
+      setInput(spokenAfterWake);
+      setVoiceStatus(`Wake phrase detected: ${spokenAfterWake}`);
+      return;
+    }
+
+    setInput((prev) => `${prev} ${spoken}`.trim());
+    setVoiceStatus(`Heard: ${spoken}`);
   }
 
   async function handleLogout() {
@@ -639,12 +1055,80 @@ export default function Home() {
     }
   }
 
+  async function fileToDataUrl(file: File): Promise<string> {
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        if (typeof reader.result === "string") resolve(reader.result);
+        else reject(new Error("Failed to read file."));
+      };
+
+      reader.onerror = () => reject(new Error("Failed to read file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function buildOcrImageDataUrls(file: File): Promise<string[]> {
+    const name = file.name.toLowerCase();
+    const type = file.type || "";
+
+    if (type.startsWith("image/")) {
+      const dataUrl = await fileToDataUrl(file);
+      return [dataUrl];
+    }
+
+    if (type === "application/pdf" || name.endsWith(".pdf")) {
+      try {
+        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+        (pdfjsLib as any).GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${
+          (pdfjsLib as any).version
+        }/legacy/build/pdf.worker.min.mjs`;
+
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = (pdfjsLib as any).getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+
+        const maxPages = Math.min(pdf.numPages, 2);
+        const images: string[] = [];
+
+        for (let i = 1; i <= maxPages; i++) {
+          const page = await pdf.getPage(i);
+          const viewport = page.getViewport({ scale: 1.5 });
+
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+
+          if (!context) continue;
+
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+
+          await page.render({
+            canvasContext: context,
+            viewport
+          }).promise;
+
+          images.push(canvas.toDataURL("image/png"));
+        }
+
+        return images;
+      } catch (error) {
+        console.error("PDF image generation failed:", error);
+        return [];
+      }
+    }
+
+    return [];
+  }
+
   async function uploadSelectedFile(): Promise<{
     uploadedMessage: Msg | null;
     returnedChatId: string | null;
   }> {
     if (!selectedFile) {
-      return { uploadedMessage: null, returnedChatId: activeChatId };
+      return { uploadedMessage: null, returnedChatId: activeChatIdRef.current };
     }
 
     const formData = new FormData();
@@ -652,7 +1136,7 @@ export default function Home() {
 
     if (userId) formData.append("userId", userId);
     if (guestId) formData.append("guestId", guestId);
-    if (activeChatId) formData.append("chatId", activeChatId);
+    if (activeChatIdRef.current) formData.append("chatId", activeChatIdRef.current);
 
     const fileType = selectedFile.type || "";
     const fileName = selectedFile.name.toLowerCase();
@@ -663,7 +1147,6 @@ export default function Home() {
 
     if (shouldRunOcr) {
       const ocrImages = await buildOcrImageDataUrls(selectedFile);
-
       ocrImages.forEach((img, index) => {
         if (img && typeof img === "string") {
           formData.append(`ocrImageDataUrl_${index}`, img);
@@ -695,19 +1178,21 @@ export default function Home() {
 
     return {
       uploadedMessage,
-      returnedChatId: data.chatId || activeChatId
+      returnedChatId: data.chatId || activeChatIdRef.current
     };
   }
 
   async function sendMessage(customMessages?: Msg[]) {
-    if (loading) return;
+    if (loadingRef.current) return;
     if (!customMessages && !input.trim() && !selectedFile) return;
 
     setLoading(true);
+    loadingRef.current = true;
+    stopListening();
 
     try {
-      let workingMessages = customMessages ? [...customMessages] : [...messages];
-      let currentChatId = activeChatId;
+      let workingMessages = customMessages ? [...customMessages] : [...messagesRef.current];
+      let currentChatId = activeChatIdRef.current;
 
       if (!customMessages && selectedFile) {
         const uploadResult = await uploadSelectedFile();
@@ -715,11 +1200,13 @@ export default function Home() {
         if (uploadResult.uploadedMessage) {
           workingMessages = [...workingMessages, uploadResult.uploadedMessage];
           setMessages(workingMessages);
+          messagesRef.current = workingMessages;
         }
 
         if (uploadResult.returnedChatId && !currentChatId) {
           currentChatId = uploadResult.returnedChatId;
           setActiveChatId(uploadResult.returnedChatId);
+          activeChatIdRef.current = uploadResult.returnedChatId;
         }
 
         if (!input.trim()) {
@@ -728,7 +1215,9 @@ export default function Home() {
         }
       }
 
-      const trimmedInput = input.trim();
+      const trimmedInput = customMessages
+        ? customMessages[customMessages.length - 1]?.content?.trim() || ""
+        : input.trim();
 
       const nextMessages = customMessages
         ? workingMessages
@@ -739,6 +1228,7 @@ export default function Home() {
       if (!customMessages) {
         setInput("");
         setMessages(nextMessages);
+        messagesRef.current = nextMessages;
       }
 
       if (isMobile) setSidebarOpen(false);
@@ -767,19 +1257,24 @@ export default function Home() {
             errorMessage = errorData?.error || errorMessage;
           } catch {}
 
-          setMessages([...nextMessages, { role: "assistant", content: errorMessage }]);
+          const updated = [...nextMessages, { role: "assistant", content: errorMessage }];
+          setMessages(updated);
+          messagesRef.current = updated;
           await loadHistory();
           return;
         }
 
         const imageData = await imageRes.json();
         const imageReply = imageData.url || imageData.error || "...";
-        const newChatId = imageData.chatId || currentChatId || activeChatId || null;
+        const newChatId = imageData.chatId || currentChatId || activeChatIdRef.current || null;
 
-        setMessages([...nextMessages, { role: "assistant", content: imageReply }]);
+        const updated = [...nextMessages, { role: "assistant", content: imageReply }];
+        setMessages(updated);
+        messagesRef.current = updated;
 
         if (newChatId) {
           setActiveChatId(newChatId);
+          activeChatIdRef.current = newChatId;
         }
 
         await loadHistory();
@@ -800,48 +1295,74 @@ export default function Home() {
         })
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        let errorMessage = "Request failed.";
-
-        try {
-          const errorData = await res.json();
-          errorMessage = errorData?.error || errorMessage;
-        } catch {}
-
-        setMessages([...nextMessages, { role: "assistant", content: errorMessage }]);
+        const errorMessage = data?.error || "Request failed.";
+        const updated = [...nextMessages, { role: "assistant", content: errorMessage }];
+        setMessages(updated);
+        messagesRef.current = updated;
         await loadHistory();
         return;
       }
 
-      const returnedChatId = res.headers.get("X-Chat-Id");
+      const assistantReply = data?.reply || "No response.";
+      const returnedChatId =
+        data?.chatId || res.headers.get("X-Chat-Id") || currentChatId || null;
+
       if (returnedChatId) {
         setActiveChatId(returnedChatId);
+        activeChatIdRef.current = returnedChatId;
       }
 
-      await streamAssistantReply(nextMessages, res);
+      const updated = [...nextMessages, { role: "assistant", content: assistantReply }];
+      setMessages(updated);
+      messagesRef.current = updated;
+
+      if (data?.liveDataUsed) {
+        setVoiceStatus("Live data used for this answer");
+      } else {
+        setVoiceStatus("Answer generated");
+      }
+
+      if (voiceAssistantRef.current && assistantReply) {
+        speakText(assistantReply);
+      } else {
+        scheduleHandsFreeRestart(700);
+      }
+
       await loadHistory();
     } catch (error: any) {
       if (error?.name === "AbortError") {
+        setVoiceStatus("Generation stopped");
+        scheduleHandsFreeRestart(700);
         return;
       }
 
-      setMessages((prev) => [
-        ...prev,
+      const updated = [
+        ...messagesRef.current,
         {
           role: "assistant",
           content: error instanceof Error ? error.message : "Request failed."
         }
-      ]);
+      ];
+      setMessages(updated);
+      messagesRef.current = updated;
+      scheduleHandsFreeRestart(700);
     } finally {
       abortControllerRef.current = null;
       setLoading(false);
+      loadingRef.current = false;
     }
   }
 
   async function regenerateLastReply() {
-    const trimmed = [...messages];
+    const trimmed = [...messagesRef.current];
     if (!trimmed.length) return;
     if (trimmed[trimmed.length - 1]?.role === "assistant") trimmed.pop();
+
+    setMessages(trimmed);
+    messagesRef.current = trimmed;
     await sendMessage(trimmed);
   }
 
@@ -854,9 +1375,11 @@ export default function Home() {
 
     await fetch(`/api/delete?${params.toString()}`, { method: "DELETE" });
 
-    if (activeChatId === id) {
+    if (activeChatIdRef.current === id) {
       setActiveChatId(null);
+      activeChatIdRef.current = null;
       setMessages([]);
+      messagesRef.current = [];
     }
 
     await loadHistory();
@@ -883,7 +1406,9 @@ export default function Home() {
       }
 
       setActiveChatId(null);
+      activeChatIdRef.current = null;
       setMessages([]);
+      messagesRef.current = [];
       setHistory([]);
       await loadHistory();
     } catch {
@@ -911,14 +1436,19 @@ export default function Home() {
 
   function newChat() {
     setMessages([]);
+    messagesRef.current = [];
     setActiveChatId(null);
+    activeChatIdRef.current = null;
     setSelectedFile(null);
+    stopSpeaking();
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
 
     if (isMobile) setSidebarOpen(false);
+    setVoiceStatus("Wake phrase: Hey Nexa");
+    scheduleHandsFreeRestart(500);
   }
 
   async function copyText(text: string) {
@@ -1416,7 +1946,7 @@ export default function Home() {
                   position: "absolute",
                   top: "calc(100% + 8px)",
                   right: 0,
-                  width: isMobile ? 200 : 240,
+                  width: isMobile ? 270 : 320,
                   maxWidth: "calc(100vw - 24px)",
                   background: "#1f1f1f",
                   border: "1px solid #333",
@@ -1426,6 +1956,122 @@ export default function Home() {
                   zIndex: 80
                 }}
               >
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderBottom: "1px solid #2f2f2f",
+                    background: "#191919"
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "#9ca3af",
+                      marginBottom: 8
+                    }}
+                  >
+                    Voice assistant
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                    <button
+                      onClick={() => {
+                        if (voiceAssistantOn) stopSpeaking();
+                        setVoiceAssistantOn((prev) => !prev);
+                      }}
+                      style={{
+                        ...smallButtonStyle,
+                        background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
+                        border: voiceAssistantOn
+                          ? "1px solid #2f7f64"
+                          : "1px solid #3b465a"
+                      }}
+                    >
+                      {voiceAssistantOn ? "Voice On" : "Voice Off"}
+                    </button>
+
+                    <button onClick={stopSpeaking} style={smallButtonStyle}>
+                      Stop Voice
+                    </button>
+                  </div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        fontSize: 13,
+                        color: "white"
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={handsFreeWakeMode}
+                        onChange={toggleHandsFree}
+                      />
+                      Optional hands-free wake mode
+                    </label>
+                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                      New voice prompt is accepted only after the current answer finishes.
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>
+                      Language
+                    </div>
+                    <select
+                      value={voiceLanguage}
+                      onChange={(e) => setVoiceLanguage(e.target.value as VoiceLanguage)}
+                      style={{
+                        width: "100%",
+                        background: "#2a2a2a",
+                        color: "white",
+                        border: "1px solid #3a3a3a",
+                        borderRadius: 8,
+                        padding: "8px 10px"
+                      }}
+                    >
+                      <option value="en-US">English (US)</option>
+                      <option value="en-IN">English (India)</option>
+                      <option value="hi-IN">Hindi</option>
+                      <option value="te-IN">Telugu</option>
+                      <option value="ta-IN">Tamil</option>
+                      <option value="kn-IN">Kannada</option>
+                      <option value="ja-JP">Japanese</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>
+                      Voice
+                    </div>
+                    <select
+                      value={selectedVoiceURI}
+                      onChange={(e) => setSelectedVoiceURI(e.target.value)}
+                      style={{
+                        width: "100%",
+                        background: "#2a2a2a",
+                        color: "white",
+                        border: "1px solid #3a3a3a",
+                        borderRadius: 8,
+                        padding: "8px 10px"
+                      }}
+                    >
+                      {filteredVoices.length === 0 ? (
+                        <option value="">Default voice</option>
+                      ) : (
+                        filteredVoices.map((voice) => (
+                          <option key={voice.voiceURI} value={voice.voiceURI}>
+                            {voice.name} ({voice.lang})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+                </div>
+
                 {userId ? (
                   <>
                     <div
@@ -1550,12 +2196,53 @@ export default function Home() {
               >
                 How can I help you today?
               </div>
+
               <div style={{ color: "#9ca3af", fontSize: isMobile ? 15 : 16 }}>
-                One chat for everything — text, code, image prompts, files, and photos.
+                One chat for text, code, images, files, camera, voice, and live answers.
               </div>
+
+              <div
+                style={{
+                  marginTop: 16,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  background: "#1f2937",
+                  border: "1px solid #374151",
+                  borderRadius: 999,
+                  padding: "8px 14px",
+                  fontSize: 13,
+                  color: "#cbd5e1"
+                }}
+              >
+                <SparklesIcon width={16} height={16} />
+                <span>{voiceStatus}</span>
+              </div>
+
+              {!speechSupported && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    fontSize: 13,
+                    color: "#fbbf24"
+                  }}
+                >
+                  Microphone input is not supported in this browser.
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 12px" }}>
+              <div
+                style={{
+                  marginBottom: 12,
+                  fontSize: 12,
+                  color: "#a5b4fc"
+                }}
+              >
+                {voiceStatus}
+              </div>
+
               {messages.map((m, i) => {
                 const parsedFile = parseFileMessage(m.content);
                 const isImage =
@@ -1853,6 +2540,13 @@ export default function Home() {
                             Copy
                           </button>
 
+                          <button
+                            style={smallButtonStyle}
+                            onClick={() => speakText(m.content)}
+                          >
+                            Speak
+                          </button>
+
                           {i === messages.length - 1 && (
                             <button
                               style={smallButtonStyle}
@@ -1937,6 +2631,18 @@ export default function Home() {
               </div>
             )}
 
+            <div
+              style={{
+                marginBottom: 8,
+                fontSize: 12,
+                color: "#94a3b8"
+              }}
+            >
+              Voice language: {getLanguageLabel(voiceLanguage)}
+              {selectedVoiceURI ? " • custom voice selected" : ""}
+              {handsFreeWakeMode ? " • hands-free on" : " • hands-free off"}
+            </div>
+
             {isMobile ? (
               <div
                 style={{
@@ -1966,6 +2672,56 @@ export default function Home() {
 
                 <button
                   type="button"
+                  style={{
+                    ...iconButtonStyle,
+                    background: isListening ? "#7c3aed" : "#2b3445",
+                    border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
+                  }}
+                  onClick={startMicOnce}
+                  title="Speak"
+                >
+                  <MicIcon width={18} height={18} />
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    ...iconButtonStyle,
+                    background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
+                    border: voiceAssistantOn
+                      ? "1px solid #2f7f64"
+                      : "1px solid #3b465a"
+                  }}
+                  onClick={() => {
+                    if (voiceAssistantOn) stopSpeaking();
+                    setVoiceAssistantOn((prev) => !prev);
+                  }}
+                  title={voiceAssistantOn ? "Voice on" : "Voice off"}
+                >
+                  {voiceAssistantOn ? (
+                    <VolumeOnIcon width={18} height={18} />
+                  ) : (
+                    <VolumeOffIcon width={18} height={18} />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    ...iconButtonStyle,
+                    background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
+                    border: handsFreeWakeMode
+                      ? "1px solid #14b8a6"
+                      : "1px solid #3b465a"
+                  }}
+                  onClick={toggleHandsFree}
+                  title="Hands-free wake mode"
+                >
+                  <SparklesIcon width={18} height={18} />
+                </button>
+
+                <button
+                  type="button"
                   style={iconButtonStyle}
                   onClick={openCamera}
                   title="Camera"
@@ -1979,11 +2735,7 @@ export default function Home() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-
-                      if (loading) return;
-                      if (!input.trim() && !selectedFile) return;
-
-                      void sendMessage();
+                      void submitCurrentInput();
                     }
                   }}
                   rows={1}
@@ -2003,9 +2755,11 @@ export default function Home() {
                     lineHeight: 1.4
                   }}
                   placeholder={
-                    selectedFile
-                      ? "Ask about the file/photo..."
-                      : "Message Nexa AI"
+                    isListening
+                      ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
+                      : selectedFile
+                        ? "Ask about the file/photo..."
+                        : "Message Nexa AI"
                   }
                 />
 
@@ -2026,10 +2780,7 @@ export default function Home() {
                   <button
                     type="button"
                     style={iconButtonStyle}
-                    onClick={() => {
-                      if (!input.trim() && !selectedFile) return;
-                      void sendMessage();
-                    }}
+                    onClick={() => void submitCurrentInput()}
                     title="Send"
                   >
                     <SendIcon width={18} height={18} />
@@ -2065,6 +2816,56 @@ export default function Home() {
 
                 <button
                   type="button"
+                  style={{
+                    ...iconButtonStyle,
+                    background: isListening ? "#7c3aed" : "#2b3445",
+                    border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
+                  }}
+                  onClick={startMicOnce}
+                  title="Speak"
+                >
+                  <MicIcon width={18} height={18} />
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    ...iconButtonStyle,
+                    background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
+                    border: voiceAssistantOn
+                      ? "1px solid #2f7f64"
+                      : "1px solid #3b465a"
+                  }}
+                  onClick={() => {
+                    if (voiceAssistantOn) stopSpeaking();
+                    setVoiceAssistantOn((prev) => !prev);
+                  }}
+                  title={voiceAssistantOn ? "Voice on" : "Voice off"}
+                >
+                  {voiceAssistantOn ? (
+                    <VolumeOnIcon width={18} height={18} />
+                  ) : (
+                    <VolumeOffIcon width={18} height={18} />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    ...iconButtonStyle,
+                    background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
+                    border: handsFreeWakeMode
+                      ? "1px solid #14b8a6"
+                      : "1px solid #3b465a"
+                  }}
+                  onClick={toggleHandsFree}
+                  title="Hands-free wake mode"
+                >
+                  <SparklesIcon width={18} height={18} />
+                </button>
+
+                <button
+                  type="button"
                   style={iconButtonStyle}
                   onClick={openCamera}
                   title="Camera"
@@ -2078,11 +2879,7 @@ export default function Home() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-
-                      if (loading) return;
-                      if (!input.trim() && !selectedFile) return;
-
-                      void sendMessage();
+                      void submitCurrentInput();
                     }
                   }}
                   rows={1}
@@ -2100,9 +2897,11 @@ export default function Home() {
                     boxSizing: "border-box"
                   }}
                   placeholder={
-                    selectedFile
-                      ? "Ask something about the file/photo, or press Send to upload only"
-                      : "Message Nexa AI"
+                    isListening
+                      ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
+                      : selectedFile
+                        ? "Ask something about the file/photo, or press Send to upload only"
+                        : "Message Nexa AI"
                   }
                 />
 
@@ -2123,15 +2922,24 @@ export default function Home() {
                   <button
                     type="button"
                     style={iconButtonStyle}
-                    onClick={() => {
-                      if (!input.trim() && !selectedFile) return;
-                      void sendMessage();
-                    }}
+                    onClick={() => void submitCurrentInput()}
                     title="Send"
                   >
                     <SendIcon width={18} height={18} />
                   </button>
                 )}
+              </div>
+            )}
+
+            {!speechSupported && (
+              <div
+                style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  color: "#fbbf24"
+                }}
+              >
+                Microphone input is not supported in this browser.
               </div>
             )}
           </div>
