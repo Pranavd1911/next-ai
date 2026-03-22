@@ -41,6 +41,14 @@ type AnthropicChatMessage = {
   content: string;
 };
 
+type RawFileMessage = {
+  fileName: string;
+  fileUrl: string;
+  mimeType: string;
+  extractedText: string;
+  extractionStatus: string;
+};
+
 async function incrementChatUsage(ownerId: string) {
   const { data: existing } = await supabaseAdmin
     .from("usage_counts")
@@ -180,6 +188,145 @@ function buildOpenAIInput(messages: ChatMessage[], systemPrompt: string) {
   );
 
   return lines.join("\n");
+}
+
+function parseRawFileMessage(content: string): RawFileMessage | null {
+  if (!content.startsWith("FILETEXT::")) return null;
+
+  const parts = content.split("::");
+  if (parts.length < 6) return null;
+
+  return {
+    fileName: decodeURIComponent(parts[1] || ""),
+    fileUrl: decodeURIComponent(parts[2] || ""),
+    mimeType: decodeURIComponent(parts[3] || ""),
+    extractedText: decodeURIComponent(parts[4] || ""),
+    extractionStatus: decodeURIComponent(parts[5] || "")
+  };
+}
+
+function detectAgentProfile(params: {
+  latestUserMessage: string;
+  codeModeEnabled: boolean;
+  rawMessages: unknown;
+}) {
+  const text = params.latestUserMessage.toLowerCase();
+
+  if (params.codeModeEnabled) return "coding";
+
+  const codingKeywords = [
+    "code",
+    "debug",
+    "bug",
+    "typescript",
+    "javascript",
+    "python",
+    "react",
+    "next.js",
+    "api",
+    "sql",
+    "fix this code"
+  ];
+
+  if (codingKeywords.some((keyword) => text.includes(keyword))) {
+    return "coding";
+  }
+
+  const researchKeywords = [
+    "latest",
+    "current",
+    "recent",
+    "news",
+    "research",
+    "compare",
+    "market",
+    "trend"
+  ];
+
+  if (researchKeywords.some((keyword) => text.includes(keyword))) {
+    return "research";
+  }
+
+  const rawMessageList = Array.isArray(params.rawMessages) ? params.rawMessages : [];
+  const hasUploadedImage = rawMessageList.some((message) => {
+    if (!message || typeof message !== "object") return false;
+    const content =
+      typeof (message as { content?: unknown }).content === "string"
+        ? ((message as { content: string }).content)
+        : "";
+    const parsed = parseRawFileMessage(content);
+    return !!parsed && parsed.mimeType.startsWith("image/");
+  });
+
+  if (
+    hasUploadedImage &&
+    ["image", "photo", "picture", "solve", "question", "diagram", "explain this"].some(
+      (keyword) => text.includes(keyword)
+    )
+  ) {
+    return "vision";
+  }
+
+  return "general";
+}
+
+function buildAgentInstructions(agentProfile: string) {
+  switch (agentProfile) {
+    case "coding":
+      return "You are the Coding Agent. Prioritize implementation, debugging, correctness, and minimal theory.";
+    case "research":
+      return "You are the Research Agent. Prioritize up-to-date reasoning, comparisons, and evidence-aware answers.";
+    case "vision":
+      return "You are the Vision Agent. Analyze uploaded images carefully, explain what is visible, and solve questions shown in photos when possible.";
+    default:
+      return "You are the General Agent. Be direct, helpful, and practical.";
+  }
+}
+
+function buildVisionInput(params: {
+  rawMessages: unknown;
+  latestUserMessage: string;
+  systemPrompt: string;
+}) {
+  const rawMessageList = Array.isArray(params.rawMessages) ? params.rawMessages : [];
+  const latestImages = rawMessageList
+    .map((message) => {
+      if (!message || typeof message !== "object") return null;
+      const content =
+        typeof (message as { content?: unknown }).content === "string"
+          ? ((message as { content: string }).content)
+          : "";
+      return parseRawFileMessage(content);
+    })
+    .filter((file): file is RawFileMessage => !!file && file.mimeType.startsWith("image/"))
+    .slice(-2);
+
+  const content: Array<Record<string, unknown>> = [
+    {
+      type: "input_text",
+      text: [
+        params.systemPrompt,
+        "",
+        "Analyze the uploaded image(s) and answer the user's request directly.",
+        `User request: ${params.latestUserMessage}`
+      ].join("\n")
+    }
+  ];
+
+  for (const image of latestImages) {
+    content.push({
+      type: "input_image",
+      image_url: image.fileUrl,
+      detail: "high"
+    });
+  }
+
+  return [
+    {
+      role: "user",
+      content
+    }
+  ];
 }
 
 function buildPreferenceInstructions(params: {
@@ -400,7 +547,9 @@ export async function POST(req: Request) {
       memory = "",
       webSearchEnabled = true,
       codeModeEnabled = false,
-      prefersDirectAnswers = true
+      prefersDirectAnswers = true,
+      rawMessages = null,
+      fullVoiceMode = false
     } = body;
 
     const ownerId = requireOwnerId(userId, guestId);
@@ -475,8 +624,14 @@ export async function POST(req: Request) {
       typeof webSearchEnabled === "boolean"
         ? webSearchEnabled
         : savedPreferences.web_search_enabled;
+    const agentProfile = detectAgentProfile({
+      latestUserMessage,
+      codeModeEnabled: effectiveCodeMode,
+      rawMessages
+    });
     const systemPrompt = [
       systemPromptForMode(validatedMode as never),
+      buildAgentInstructions(agentProfile),
       buildPreferenceInstructions({
         memory: effectiveMemory,
         codeModeEnabled: effectiveCodeMode,
@@ -491,13 +646,15 @@ export async function POST(req: Request) {
       ownerId,
       eventName: "chat_request",
       chatId: activeChatId,
-      metadata: {
-        model: validatedModel,
-        mode: validatedMode,
-        webSearchEnabled: effectiveWebSearch,
-        codeModeEnabled: effectiveCodeMode
-      }
-    });
+        metadata: {
+          model: validatedModel,
+          mode: validatedMode,
+          agentProfile,
+          webSearchEnabled: effectiveWebSearch,
+          codeModeEnabled: effectiveCodeMode,
+          fullVoiceMode
+        }
+      });
 
     if (validatedModel === "claude") {
       if (!anthropicKey) {
@@ -532,10 +689,11 @@ export async function POST(req: Request) {
         eventName: "chat_success",
         chatId: activeChatId,
         metadata: {
-          model: validatedModel,
-          mode: validatedMode
-        }
-      });
+            model: validatedModel,
+            mode: validatedMode,
+            agentProfile
+          }
+        });
 
       return NextResponse.json(
         {
@@ -557,7 +715,14 @@ export async function POST(req: Request) {
     const responseStream = await openai.responses.create(
       {
         model: "gpt-4.1-mini",
-        input: buildOpenAIInput(normalizedMessages, systemPrompt),
+        input:
+          agentProfile === "vision"
+            ? buildVisionInput({
+                rawMessages,
+                latestUserMessage,
+                systemPrompt
+              }) as any
+            : buildOpenAIInput(normalizedMessages, systemPrompt),
         tools: useLiveWeb ? [{ type: "web_search_preview" }] : [],
         stream: true
       },
@@ -575,7 +740,8 @@ export async function POST(req: Request) {
             createSseEvent("meta", {
               chatId: activeChatId,
               liveDataUsed: useLiveWeb,
-              rememberedMemory: effectiveMemory
+              rememberedMemory: effectiveMemory,
+              agentProfile
             })
           )
         );
@@ -611,7 +777,8 @@ export async function POST(req: Request) {
                 reply: finalReply,
                 chatId: activeChatId,
                 liveDataUsed: useLiveWeb,
-                rememberedMemory: effectiveMemory
+                rememberedMemory: effectiveMemory,
+                agentProfile
               })
             )
           );

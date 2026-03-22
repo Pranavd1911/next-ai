@@ -36,9 +36,9 @@ type ToastItem = {
 };
 
 type StreamChunkEvent =
-  | { type: "meta"; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string }
+  | { type: "meta"; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string; agentProfile?: string }
   | { type: "delta"; delta?: string }
-  | { type: "done"; reply?: string; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string }
+  | { type: "done"; reply?: string; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string; agentProfile?: string }
   | { type: "error"; error?: string };
 
 type ChatItem = {
@@ -276,6 +276,7 @@ export default function Home() {
   const [isListening, setIsListening] = useState(false);
   const [voiceAssistantOn, setVoiceAssistantOn] = useState(true);
   const [handsFreeWakeMode, setHandsFreeWakeMode] = useState(false);
+  const [fullVoiceMode, setFullVoiceMode] = useState(false);
   const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>("en-US");
   const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
@@ -284,6 +285,7 @@ export default function Home() {
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [codeModeEnabled, setCodeModeEnabled] = useState(false);
   const [prefersDirectAnswers, setPrefersDirectAnswers] = useState(true);
+  const [activeAgentLabel, setActiveAgentLabel] = useState("General Agent");
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [retryMessages, setRetryMessages] = useState<Msg[] | null>(null);
 
@@ -343,6 +345,19 @@ export default function Home() {
     return "Something went wrong. Your latest message is safe locally, and you can retry.";
   }
 
+  function getAgentLabel(agentProfile?: string) {
+    switch (agentProfile) {
+      case "coding":
+        return "Coding Agent";
+      case "research":
+        return "Research Agent";
+      case "vision":
+        return "Vision Agent";
+      default:
+        return "General Agent";
+    }
+  }
+
   async function consumeChatStream(
     res: Response,
     nextMessages: Msg[],
@@ -390,6 +405,7 @@ export default function Home() {
         if (typeof metaPayload.rememberedMemory === "string") {
           setRememberedMemory(metaPayload.rememberedMemory);
         }
+        setActiveAgentLabel(getAgentLabel(metaPayload.agentProfile));
         return;
       }
 
@@ -417,6 +433,7 @@ export default function Home() {
         if (typeof donePayload.rememberedMemory === "string") {
           setRememberedMemory(donePayload.rememberedMemory);
         }
+        setActiveAgentLabel(getAgentLabel(donePayload.agentProfile));
         applyAssistantText(streamedReply);
       }
     };
@@ -558,7 +575,9 @@ export default function Home() {
       return;
     }
 
-    stopListening();
+    if (!fullVoiceMode) {
+      stopListening();
+    }
     stopSpeaking();
 
     const utterance = new SpeechSynthesisUtterance(clean);
@@ -579,7 +598,7 @@ export default function Home() {
 
     utterance.onstart = () => {
       isSpeakingRef.current = true;
-      setVoiceStatus("Speaking...");
+      setVoiceStatus(fullVoiceMode ? "Speaking. Tap mic to interrupt." : "Speaking...");
     };
 
     utterance.onend = () => {
@@ -1126,6 +1145,10 @@ export default function Home() {
       return;
     }
 
+    if (isSpeakingRef.current) {
+      stopSpeaking();
+    }
+
     clearRestartTimer();
     userStoppedRef.current = false;
     manualMicModeRef.current = true;
@@ -1148,6 +1171,18 @@ export default function Home() {
 
   function toggleHandsFree() {
     setHandsFreeWakeMode((prev) => !prev);
+    if (isMobile) setMobileActionsOpen(false);
+  }
+
+  function toggleFullVoiceMode() {
+    const next = !fullVoiceMode;
+    setFullVoiceMode(next);
+    setVoiceAssistantOn(next ? true : voiceAssistantOn);
+    setHandsFreeWakeMode(next ? true : handsFreeWakeMode);
+    setVoiceStatus(next ? "Full voice mode on" : "Wake phrase: Hey Nexa");
+    if (next && !loadingRef.current && !isSpeakingRef.current) {
+      scheduleHandsFreeRestart(200);
+    }
     if (isMobile) setMobileActionsOpen(false);
   }
 
@@ -1523,6 +1558,13 @@ export default function Home() {
       }
 
       const resolvedRoute = resolveModel(trimmedInput);
+      setActiveAgentLabel(
+        resolvedRoute === "image"
+          ? "Image Agent"
+          : codeModeEnabled
+            ? "Coding Agent"
+            : "General Agent"
+      );
 
       if (!customMessages) {
         setInput("");
@@ -1587,6 +1629,7 @@ export default function Home() {
         signal: controller.signal,
         body: JSON.stringify({
           messages: convertMessagesForApi(nextMessages),
+          rawMessages: nextMessages,
           mode: "general",
           model: resolvedRoute,
           guestId,
@@ -1595,7 +1638,8 @@ export default function Home() {
           memory: rememberedMemory,
           webSearchEnabled,
           codeModeEnabled,
-          prefersDirectAnswers
+          prefersDirectAnswers,
+          fullVoiceMode
         })
       });
 
@@ -1625,6 +1669,7 @@ export default function Home() {
       if (typeof data?.rememberedMemory === "string") {
         setRememberedMemory(data.rememberedMemory);
       }
+      setActiveAgentLabel(getAgentLabel(data?.agentProfile));
 
       if (returnedChatId) {
         setActiveChatId(returnedChatId);
@@ -2480,6 +2525,16 @@ export default function Home() {
                     <button onClick={stopSpeaking} style={smallButtonStyle}>
                       Stop Voice
                     </button>
+
+                    <button
+                      onClick={toggleFullVoiceMode}
+                      style={{
+                        ...smallButtonStyle,
+                        background: fullVoiceMode ? "#16324f" : "#2b3445"
+                      }}
+                    >
+                      {fullVoiceMode ? "Full Voice On" : "Full Voice Off"}
+                    </button>
                   </div>
 
                   <div style={{ marginBottom: 10 }}>
@@ -3149,8 +3204,10 @@ export default function Home() {
               Voice language: {getLanguageLabel(voiceLanguage)}
               {selectedVoiceURI ? " • custom voice selected" : ""}
               {handsFreeWakeMode ? " • hands-free on" : " • hands-free off"}
+              {fullVoiceMode ? " • full voice on" : ""}
               {webSearchEnabled ? " • web on" : " • web off"}
               {codeModeEnabled ? " • code mode on" : ""}
+              {` • ${activeAgentLabel.toLowerCase()}`}
             </div>
 
             <div
@@ -3314,13 +3371,16 @@ export default function Home() {
                         type="button"
                         style={{
                           ...mobileActionCardStyle,
-                          background: isListening ? "#7c3aed" : "#2b3445",
-                          border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
+                          background: isListening || isSpeakingRef.current ? "#7c3aed" : "#2b3445",
+                          border:
+                            isListening || isSpeakingRef.current
+                              ? "1px solid #8b5cf6"
+                              : "1px solid #3b465a"
                         }}
                         onClick={startMicOnce}
                       >
                         <MicIcon width={18} height={18} />
-                        <span>Speak</span>
+                        <span>{isSpeakingRef.current ? "Interrupt + Speak" : "Speak"}</span>
                       </button>
 
                       <button
@@ -3359,6 +3419,19 @@ export default function Home() {
                       >
                         <SparklesIcon width={18} height={18} />
                         <span>{handsFreeWakeMode ? "Hands-free on" : "Hands-free off"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: fullVoiceMode ? "#16324f" : "#2b3445",
+                          border: fullVoiceMode ? "1px solid #46c2ff" : "1px solid #3b465a"
+                        }}
+                        onClick={toggleFullVoiceMode}
+                      >
+                        <VolumeOnIcon width={18} height={18} />
+                        <span>{fullVoiceMode ? "Full voice on" : "Full voice off"}</span>
                       </button>
 
                       <button
@@ -3501,11 +3574,14 @@ export default function Home() {
                   type="button"
                   style={{
                     ...iconButtonStyle,
-                    background: isListening ? "#7c3aed" : "#2b3445",
-                    border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
+                    background: isListening || isSpeakingRef.current ? "#7c3aed" : "#2b3445",
+                    border:
+                      isListening || isSpeakingRef.current
+                        ? "1px solid #8b5cf6"
+                        : "1px solid #3b465a"
                   }}
                   onClick={startMicOnce}
-                  title="Speak"
+                  title={isSpeakingRef.current ? "Interrupt and speak" : "Speak"}
                 >
                   <MicIcon width={18} height={18} />
                 </button>
@@ -3545,6 +3621,19 @@ export default function Home() {
                   title="Hands-free wake mode"
                 >
                   <SparklesIcon width={18} height={18} />
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    ...iconButtonStyle,
+                    background: fullVoiceMode ? "#16324f" : "#2b3445",
+                    border: fullVoiceMode ? "1px solid #46c2ff" : "1px solid #3b465a"
+                  }}
+                  onClick={toggleFullVoiceMode}
+                  title="Full voice mode"
+                >
+                  <VolumeOnIcon width={18} height={18} />
                 </button>
 
                 <button
