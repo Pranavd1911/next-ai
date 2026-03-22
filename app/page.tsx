@@ -1542,7 +1542,7 @@ export default function Home() {
     background: "#2b3445",
     color: "white",
     border: "1px solid #3b465a",
-    borderRadius: 10,
+    borderRadius: 12,
     padding: "8px 12px",
     cursor: "pointer"
   };
@@ -1584,10 +1584,11 @@ export default function Home() {
   };
 
   const sidebarStyle: CSSProperties = {
-    width: isMobile ? 290 : 280,
+    width: isMobile ? "82vw" : 280,
+    maxWidth: isMobile ? 320 : 280,
     background: "#171717",
     borderRight: "1px solid #2f2f2f",
-    padding: 12,
+    padding: isMobile ? 14 : 12,
     overflowY: "auto",
     flexShrink: 0,
     position: isMobile ? "fixed" : "relative",
@@ -1596,7 +1597,13 @@ export default function Home() {
     height: "100vh",
     zIndex: isMobile ? 40 : "auto",
     display: "flex",
-    flexDirection: "column"
+    flexDirection: "column",
+    boxShadow: isMobile ? "10px 0 30px rgba(0,0,0,0.35)" : "none"
+  };
+
+  const bubbleBaseStyle: CSSProperties = {
+    borderRadius: isMobile ? 16 : 18,
+    boxShadow: "0 1px 2px rgba(0,0,0,0.25)"
   };
 
   return (
@@ -1727,7 +1734,8 @@ export default function Home() {
               width: "100%",
               marginBottom: 14,
               background: "#2a2a2a",
-              border: "1px solid #3a3a3a"
+              border: "1px solid #3a3a3a",
+              minHeight: 44
             }}
             onClick={newChat}
           >
@@ -1746,8 +1754,8 @@ export default function Home() {
               width: "100%",
               boxSizing: "border-box",
               marginBottom: 12,
-              padding: 10,
-              borderRadius: 10,
+              padding: 11,
+              borderRadius: 12,
               border: "1px solid #3a3a3a",
               background: "#2a2a2a",
               color: "white",
@@ -1795,7 +1803,7 @@ export default function Home() {
                 style={{
                   padding: 10,
                   marginBottom: 10,
-                  borderRadius: 10,
+                  borderRadius: 12,
                   background: activeChatId === h.id ? "#2a2a2a" : "transparent",
                   border: "1px solid #2f2f2f"
                 }}
@@ -1807,7 +1815,8 @@ export default function Home() {
                     color: "#f5f5f5",
                     fontWeight: 600,
                     wordBreak: "break-word",
-                    fontSize: 14
+                    fontSize: 14,
+                    lineHeight: 1.4
                   }}
                   onClick={() => loadChat(h.id)}
                 >
@@ -1847,19 +1856,23 @@ export default function Home() {
           style={{
             padding: isMobile ? "10px 12px" : "14px 18px",
             borderBottom: "1px solid #2f2f2f",
-            background: "#212121",
+            background: "rgba(33,33,33,0.95)",
+            backdropFilter: "blur(12px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             gap: 12,
-            minHeight: isMobile ? 64 : "auto"
+            minHeight: isMobile ? 64 : "auto",
+            position: "sticky",
+            top: 0,
+            zIndex: 20
           }}
         >
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 10,
+              gap: isMobile ? 8 : 10,
               minWidth: 0,
               flex: 1,
               overflow: "hidden"
@@ -1868,9 +1881,9 @@ export default function Home() {
             <button
               style={{
                 ...primaryButtonStyle,
-                width: 42,
-                minWidth: 42,
-                height: 42,
+                width: 40,
+                minWidth: 40,
+                height: 40,
                 padding: 0,
                 display: "flex",
                 alignItems: "center",
@@ -1885,7 +1898,7 @@ export default function Home() {
 
             <div
               style={{
-                fontSize: isMobile ? 18 : 20,
+                fontSize: isMobile ? 17 : 20,
                 fontWeight: 700,
                 whiteSpace: "nowrap",
                 flexShrink: 0
@@ -1901,11 +1914,13 @@ export default function Home() {
                 background: "#2a2a2a",
                 color: "white",
                 border: "1px solid #3a3a3a",
-                borderRadius: 8,
-                padding: isMobile ? "7px 8px" : "8px 10px",
+                borderRadius: 10,
+                padding: isMobile ? "8px 10px" : "8px 10px",
                 minWidth: isMobile ? 78 : 96,
-                maxWidth: isMobile ? 90 : 120,
-                flexShrink: 1
+                maxWidth: isMobile ? 92 : 120,
+                flexShrink: 1,
+                fontSize: isMobile ? 13 : 14,
+                height: 40
               }}
             >
               <option value="auto">Auto</option>
@@ -1930,9 +1945,9 @@ export default function Home() {
                 justifyContent: "center",
                 gap: 6,
                 padding: isMobile ? "8px" : "8px 10px",
-                width: isMobile ? 42 : "auto",
-                minWidth: 42,
-                height: 42
+                width: 40,
+                minWidth: 40,
+                height: 40
               }}
               title="Profile"
             >
@@ -1946,12 +1961,12 @@ export default function Home() {
                   position: "absolute",
                   top: "calc(100% + 8px)",
                   right: 0,
-                  width: isMobile ? 270 : 320,
-                  maxWidth: "calc(100vw - 24px)",
+                  width: isMobile ? "calc(100vw - 24px)" : 320,
+                  maxWidth: isMobile ? 310 : 320,
                   background: "#1f1f1f",
                   border: "1px solid #333",
-                  borderRadius: 14,
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+                  borderRadius: 16,
+                  boxShadow: "0 16px 40px rgba(0,0,0,0.4)",
                   overflow: "hidden",
                   zIndex: 80
                 }}
@@ -2012,7 +2027,7 @@ export default function Home() {
                       />
                       Optional hands-free wake mode
                     </label>
-                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, lineHeight: 1.45 }}>
                       New voice prompt is accepted only after the current answer finishes.
                     </div>
                   </div>
@@ -2030,7 +2045,7 @@ export default function Home() {
                         color: "white",
                         border: "1px solid #3a3a3a",
                         borderRadius: 8,
-                        padding: "8px 10px"
+                        padding: "10px"
                       }}
                     >
                       <option value="en-US">English (US)</option>
@@ -2056,7 +2071,7 @@ export default function Home() {
                         color: "white",
                         border: "1px solid #3a3a3a",
                         borderRadius: 8,
-                        padding: "8px 10px"
+                        padding: "10px"
                       }}
                     >
                       {filteredVoices.length === 0 ? (
@@ -2174,30 +2189,31 @@ export default function Home() {
           style={{
             flex: 1,
             overflowY: "auto",
-            padding: isMobile ? "16px 0" : "24px 0"
+            padding: isMobile ? "12px 0 18px 0" : "24px 0"
           }}
         >
           {messages.length === 0 ? (
             <div
               style={{
                 maxWidth: 800,
-                margin: isMobile ? "40px auto 0 auto" : "80px auto 0 auto",
+                margin: isMobile ? "32px auto 0 auto" : "80px auto 0 auto",
                 textAlign: "center",
                 color: "#cbd5e1",
-                padding: "0 20px"
+                padding: isMobile ? "0 16px" : "0 20px"
               }}
             >
               <div
                 style={{
-                  fontSize: isMobile ? 26 : 34,
+                  fontSize: isMobile ? 24 : 34,
                   fontWeight: 700,
-                  marginBottom: 12
+                  marginBottom: 12,
+                  lineHeight: 1.2
                 }}
               >
                 How can I help you today?
               </div>
 
-              <div style={{ color: "#9ca3af", fontSize: isMobile ? 15 : 16 }}>
+              <div style={{ color: "#9ca3af", fontSize: isMobile ? 14 : 16, lineHeight: 1.6 }}>
                 One chat for text, code, images, files, camera, voice, and live answers.
               </div>
 
@@ -2212,11 +2228,12 @@ export default function Home() {
                   borderRadius: 999,
                   padding: "8px 14px",
                   fontSize: 13,
-                  color: "#cbd5e1"
+                  color: "#cbd5e1",
+                  maxWidth: "100%"
                 }}
               >
                 <SparklesIcon width={16} height={16} />
-                <span>{voiceStatus}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{voiceStatus}</span>
               </div>
 
               {!speechSupported && (
@@ -2232,12 +2249,13 @@ export default function Home() {
               )}
             </div>
           ) : (
-            <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 12px" }}>
+            <div style={{ maxWidth: 860, margin: "0 auto", padding: isMobile ? "0 10px" : "0 12px" }}>
               <div
                 style={{
                   marginBottom: 12,
                   fontSize: 12,
-                  color: "#a5b4fc"
+                  color: "#a5b4fc",
+                  padding: isMobile ? "0 4px" : 0
                 }}
               >
                 {voiceStatus}
@@ -2264,17 +2282,16 @@ export default function Home() {
                     style={{
                       display: "flex",
                       justifyContent: isUser ? "flex-end" : "flex-start",
-                      marginBottom: 18
+                      marginBottom: isMobile ? 14 : 18
                     }}
                   >
                     <div
                       style={{
-                        maxWidth: isMobile ? "92%" : isUser ? "75%" : "85%",
+                        ...bubbleBaseStyle,
+                        maxWidth: isMobile ? "95%" : isUser ? "75%" : "85%",
                         background: isUser ? "#2f6fed" : "#2a2a2a",
                         color: "white",
-                        borderRadius: 18,
-                        padding: isMobile ? "12px 13px" : "14px 16px",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.25)"
+                        padding: isMobile ? "12px 12px" : "14px 16px"
                       }}
                     >
                       <div
@@ -2282,7 +2299,7 @@ export default function Home() {
                           fontWeight: 700,
                           color: isUser ? "#dbeafe" : "#f8fafc",
                           marginBottom: 8,
-                          fontSize: 13
+                          fontSize: 12
                         }}
                       >
                         {isUser ? "You" : "AI"}
@@ -2330,8 +2347,8 @@ export default function Home() {
                               {parsedFile.extractionStatus === "TEXT_EXTRACTED"
                                 ? "Embedded text extracted successfully"
                                 : parsedFile.extractionStatus === "OCR_TEXT_EXTRACTED"
-                                ? "OCR text extracted successfully"
-                                : "No extractable text found"}
+                                  ? "OCR text extracted successfully"
+                                  : "No extractable text found"}
                             </div>
 
                             {parsedFile.extractedText && (
@@ -2396,7 +2413,7 @@ export default function Home() {
                           </button>
                         </div>
                       ) : (
-                        <div style={{ color: "#f3f4f6", lineHeight: 1.65 }}>
+                        <div style={{ color: "#f3f4f6", lineHeight: 1.65, fontSize: isMobile ? 14 : 15 }}>
                           {segments.map((segment, index) => {
                             if (segment.type === "code") {
                               return (
@@ -2563,7 +2580,7 @@ export default function Home() {
               })}
 
               {loading && (
-                <div style={{ color: "#9ca3af", marginTop: 8 }}>
+                <div style={{ color: "#9ca3af", marginTop: 8, paddingLeft: isMobile ? 4 : 0 }}>
                   Generating...
                 </div>
               )}
@@ -2576,8 +2593,9 @@ export default function Home() {
         <div
           style={{
             borderTop: "1px solid #2f2f2f",
-            background: "#212121",
-            padding: isMobile ? "10px 12px 12px 12px" : "16px 20px 20px 20px"
+            background: "rgba(33,33,33,0.98)",
+            backdropFilter: "blur(12px)",
+            padding: isMobile ? "10px 10px calc(10px + env(safe-area-inset-bottom)) 10px" : "16px 20px 20px 20px"
           }}
         >
           <div
@@ -2590,14 +2608,16 @@ export default function Home() {
               <div
                 style={{
                   marginBottom: 10,
-                  display: "inline-flex",
+                  display: "flex",
                   alignItems: "center",
                   gap: 8,
                   background: "#2a2a2a",
                   border: "1px solid #3a3a3a",
-                  borderRadius: 999,
-                  padding: "8px 12px",
-                  maxWidth: "100%"
+                  borderRadius: 14,
+                  padding: "10px 12px",
+                  width: isMobile ? "100%" : "fit-content",
+                  maxWidth: "100%",
+                  boxSizing: "border-box"
                 }}
               >
                 <span
@@ -2605,7 +2625,7 @@ export default function Home() {
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
-                    maxWidth: 260
+                    flex: 1
                   }}
                 >
                   {selectedFile.name}
@@ -2635,7 +2655,8 @@ export default function Home() {
               style={{
                 marginBottom: 8,
                 fontSize: 12,
-                color: "#94a3b8"
+                color: "#94a3b8",
+                paddingLeft: isMobile ? 2 : 0
               }}
             >
               Voice language: {getLanguageLabel(voiceLanguage)}
@@ -2646,146 +2667,179 @@ export default function Home() {
             {isMobile ? (
               <div
                 style={{
-                  display: "flex",
-                  alignItems: "flex-end",
-                  gap: 8
+                  background: "#262626",
+                  border: "1px solid #343434",
+                  borderRadius: 18,
+                  padding: 10,
+                  boxShadow: "0 10px 25px rgba(0,0,0,0.2)"
                 }}
               >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0] || null;
-                    setSelectedFile(file);
-                  }}
-                  style={{ display: "none" }}
-                />
-
-                <button
-                  type="button"
-                  style={iconButtonStyle}
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Upload"
-                >
-                  <PaperclipIcon width={18} height={18} />
-                </button>
-
-                <button
-                  type="button"
+                <div
                   style={{
-                    ...iconButtonStyle,
-                    background: isListening ? "#7c3aed" : "#2b3445",
-                    border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
+                    display: "flex",
+                    gap: 8,
+                    marginBottom: 8,
+                    overflowX: "auto",
+                    paddingBottom: 2
                   }}
-                  onClick={startMicOnce}
-                  title="Speak"
                 >
-                  <MicIcon width={18} height={18} />
-                </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      setSelectedFile(file);
+                    }}
+                    style={{ display: "none" }}
+                  />
 
-                <button
-                  type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
-                    border: voiceAssistantOn
-                      ? "1px solid #2f7f64"
-                      : "1px solid #3b465a"
-                  }}
-                  onClick={() => {
-                    if (voiceAssistantOn) stopSpeaking();
-                    setVoiceAssistantOn((prev) => !prev);
-                  }}
-                  title={voiceAssistantOn ? "Voice on" : "Voice off"}
-                >
-                  {voiceAssistantOn ? (
-                    <VolumeOnIcon width={18} height={18} />
-                  ) : (
-                    <VolumeOffIcon width={18} height={18} />
-                  )}
-                </button>
+                  <button
+                    type="button"
+                    style={iconButtonStyle}
+                    onClick={() => fileInputRef.current?.click()}
+                    title="Upload"
+                  >
+                    <PaperclipIcon width={18} height={18} />
+                  </button>
 
-                <button
-                  type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
-                    border: handsFreeWakeMode
-                      ? "1px solid #14b8a6"
-                      : "1px solid #3b465a"
-                  }}
-                  onClick={toggleHandsFree}
-                  title="Hands-free wake mode"
-                >
-                  <SparklesIcon width={18} height={18} />
-                </button>
-
-                <button
-                  type="button"
-                  style={iconButtonStyle}
-                  onClick={openCamera}
-                  title="Camera"
-                >
-                  <CameraIcon width={18} height={18} />
-                </button>
-
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void submitCurrentInput();
-                    }
-                  }}
-                  rows={1}
-                  style={{
-                    flex: 1,
-                    padding: "12px 14px",
-                    background: "#2a2a2a",
-                    color: "white",
-                    border: "1px solid #3a3a3a",
-                    borderRadius: 16,
-                    outline: "none",
-                    resize: "none",
-                    minHeight: 44,
-                    maxHeight: 120,
-                    width: "100%",
-                    boxSizing: "border-box",
-                    lineHeight: 1.4
-                  }}
-                  placeholder={
-                    isListening
-                      ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
-                      : selectedFile
-                        ? "Ask about the file/photo..."
-                        : "Message Nexa AI"
-                  }
-                />
-
-                {loading ? (
                   <button
                     type="button"
                     style={{
                       ...iconButtonStyle,
-                      background: "#4b1d1d",
-                      border: "1px solid #7a2d2d"
+                      background: isListening ? "#7c3aed" : "#2b3445",
+                      border: isListening ? "1px solid #8b5cf6" : "1px solid #3b465a"
                     }}
-                    onClick={stopGeneration}
-                    title="Stop"
+                    onClick={startMicOnce}
+                    title="Speak"
                   >
-                    <StopIcon width={18} height={18} />
+                    <MicIcon width={18} height={18} />
                   </button>
-                ) : (
+
+                  <button
+                    type="button"
+                    style={{
+                      ...iconButtonStyle,
+                      background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
+                      border: voiceAssistantOn
+                        ? "1px solid #2f7f64"
+                        : "1px solid #3b465a"
+                    }}
+                    onClick={() => {
+                      if (voiceAssistantOn) stopSpeaking();
+                      setVoiceAssistantOn((prev) => !prev);
+                    }}
+                    title={voiceAssistantOn ? "Voice on" : "Voice off"}
+                  >
+                    {voiceAssistantOn ? (
+                      <VolumeOnIcon width={18} height={18} />
+                    ) : (
+                      <VolumeOffIcon width={18} height={18} />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    style={{
+                      ...iconButtonStyle,
+                      background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
+                      border: handsFreeWakeMode
+                        ? "1px solid #14b8a6"
+                        : "1px solid #3b465a"
+                    }}
+                    onClick={toggleHandsFree}
+                    title="Hands-free wake mode"
+                  >
+                    <SparklesIcon width={18} height={18} />
+                  </button>
+
                   <button
                     type="button"
                     style={iconButtonStyle}
-                    onClick={() => void submitCurrentInput()}
-                    title="Send"
+                    onClick={openCamera}
+                    title="Camera"
                   >
-                    <SendIcon width={18} height={18} />
+                    <CameraIcon width={18} height={18} />
                   </button>
-                )}
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-end",
+                    gap: 8
+                  }}
+                >
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        void submitCurrentInput();
+                      }
+                    }}
+                    rows={1}
+                    style={{
+                      flex: 1,
+                      padding: "12px 14px",
+                      background: "#1f1f1f",
+                      color: "white",
+                      border: "1px solid #383838",
+                      borderRadius: 14,
+                      outline: "none",
+                      resize: "none",
+                      minHeight: 48,
+                      maxHeight: 132,
+                      width: "100%",
+                      boxSizing: "border-box",
+                      lineHeight: 1.4,
+                      fontSize: 15
+                    }}
+                    placeholder={
+                      isListening
+                        ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
+                        : selectedFile
+                          ? "Ask about the file/photo..."
+                          : "Message Nexa AI"
+                    }
+                  />
+
+                  {loading ? (
+                    <button
+                      type="button"
+                      style={{
+                        ...iconButtonStyle,
+                        background: "#4b1d1d",
+                        border: "1px solid #7a2d2d",
+                        width: 48,
+                        minWidth: 48,
+                        height: 48,
+                        minHeight: 48,
+                        borderRadius: 14
+                      }}
+                      onClick={stopGeneration}
+                      title="Stop"
+                    >
+                      <StopIcon width={18} height={18} />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      style={{
+                        ...iconButtonStyle,
+                        width: 48,
+                        minWidth: 48,
+                        height: 48,
+                        minHeight: 48,
+                        borderRadius: 14
+                      }}
+                      onClick={() => void submitCurrentInput()}
+                      title="Send"
+                    >
+                      <SendIcon width={18} height={18} />
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
               <div
