@@ -31,8 +31,39 @@ create table if not exists usage_daily (
   primary key (owner_id, usage_date)
 );
 
+create table if not exists user_preferences (
+  owner_id text primary key,
+  memory text not null default '',
+  prefers_direct_answers boolean not null default true,
+  web_search_enabled boolean not null default true,
+  code_mode_enabled boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists shared_chats (
+  id uuid primary key default gen_random_uuid(),
+  chat_id uuid not null references chats(id) on delete cascade,
+  owner_id text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists analytics_events (
+  id uuid primary key default gen_random_uuid(),
+  owner_id text,
+  event_name text not null,
+  chat_id uuid references chats(id) on delete set null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists messages_chat_id_created_at_idx
 on messages (chat_id, created_at);
+
+create index if not exists analytics_events_created_at_idx
+on analytics_events (created_at);
+
+create index if not exists analytics_events_owner_id_idx
+on analytics_events (owner_id);
 
 alter table chats enable row level security;
 alter table messages enable row level security;

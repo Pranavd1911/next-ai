@@ -3,18 +3,11 @@ import type { Mode } from "./types";
 function baseRules() {
   return `
 Rules:
-- Always format responses in clean Markdown.
-- Use headings and bullet points when helpful.
+- Answer directly and avoid markdown noise.
+- Use headings and bullet points only when they genuinely help.
 - When giving code, ALWAYS wrap it in triple backticks with the language.
-
-Example:
-\`\`\`python
-def hello():
-    print("hello")
-\`\`\`
-
-- Keep answers clean and readable.
-- Prefer structured responses over long paragraphs.
+- Keep answers clean, readable, and practical.
+- Prefer short, direct answers over long preambles.
 `;
 }
 

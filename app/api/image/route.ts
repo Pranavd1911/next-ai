@@ -18,8 +18,6 @@ const openai = new OpenAI({
   apiKey: openaiKey
 });
 
-const GUEST_IMAGE_LIMIT = 10;
-const USER_IMAGE_LIMIT = 100;
 const DAILY_IMAGE_LIMIT = 5;
 
 type ChatMessage = {
@@ -128,16 +126,8 @@ export async function POST(req: Request) {
       windowMs: 60_000
     });
 
-    const usage = await incrementImageUsage(ownerId);
+    await incrementImageUsage(ownerId);
     const dailyUsage = await incrementDailyImageUsage(ownerId);
-    const limit = userId ? USER_IMAGE_LIMIT : GUEST_IMAGE_LIMIT;
-
-    if (usage.count > limit) {
-      return NextResponse.json(
-        { error: `Image usage limit reached (${limit}).` },
-        { status: 403 }
-      );
-    }
 
     if (dailyUsage.count > DAILY_IMAGE_LIMIT) {
       return NextResponse.json(

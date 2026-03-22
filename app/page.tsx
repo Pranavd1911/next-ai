@@ -36,9 +36,9 @@ type ToastItem = {
 };
 
 type StreamChunkEvent =
-  | { type: "meta"; chatId?: string; liveDataUsed?: boolean }
+  | { type: "meta"; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string }
   | { type: "delta"; delta?: string }
-  | { type: "done"; reply?: string; chatId?: string; liveDataUsed?: boolean }
+  | { type: "done"; reply?: string; chatId?: string; liveDataUsed?: boolean; rememberedMemory?: string }
   | { type: "error"; error?: string };
 
 type ChatItem = {
@@ -263,7 +263,7 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [search, setSearch] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [selectedModel, setSelectedModel] = useState<SelectedModel>("auto");
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
@@ -280,6 +280,10 @@ export default function Home() {
   const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [voiceStatus, setVoiceStatus] = useState("Wake phrase: Hey Nexa");
+  const [rememberedMemory, setRememberedMemory] = useState("");
+  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const [codeModeEnabled, setCodeModeEnabled] = useState(false);
+  const [prefersDirectAnswers, setPrefersDirectAnswers] = useState(true);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [retryMessages, setRetryMessages] = useState<Msg[] | null>(null);
 
@@ -303,6 +307,13 @@ export default function Home() {
   const userStoppedRef = useRef(false);
 
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
+
+  const selectedFileLabel =
+    selectedFiles.length === 1
+      ? selectedFiles[0]?.name || ""
+      : selectedFiles.length > 1
+        ? `${selectedFiles.length} files selected`
+        : "";
 
   function getCacheKey(chatIdArg?: string | null) {
     const ownerId = userId || guestId || "anonymous";
@@ -376,6 +387,9 @@ export default function Home() {
         }
 
         liveDataUsed = !!metaPayload.liveDataUsed;
+        if (typeof metaPayload.rememberedMemory === "string") {
+          setRememberedMemory(metaPayload.rememberedMemory);
+        }
         return;
       }
 
@@ -400,6 +414,9 @@ export default function Home() {
           activeChatIdRef.current = donePayload.chatId;
         }
         liveDataUsed = !!donePayload.liveDataUsed;
+        if (typeof donePayload.rememberedMemory === "string") {
+          setRememberedMemory(donePayload.rememberedMemory);
+        }
         applyAssistantText(streamedReply);
       }
     };
@@ -608,6 +625,54 @@ export default function Home() {
     } catch {}
   }
 
+  async function loadPreferences(currentUserIdArg?: string | null) {
+    const actualUserId = currentUserIdArg ?? userId;
+    const params = new URLSearchParams();
+
+    if (actualUserId) params.set("userId", actualUserId);
+    else if (guestId) params.set("guestId", guestId);
+    else return;
+
+    try {
+      const res = await fetch(`/api/preferences?${params.toString()}`, {
+        cache: "no-store"
+      });
+      const data = await res.json();
+      setRememberedMemory(data.memory || "");
+      setWebSearchEnabled(data.web_search_enabled !== false);
+      setCodeModeEnabled(data.code_mode_enabled === true);
+      setPrefersDirectAnswers(data.prefers_direct_answers !== false);
+    } catch {}
+  }
+
+  async function savePreferences(next?: {
+    memory?: string;
+    webSearchEnabled?: boolean;
+    codeModeEnabled?: boolean;
+    prefersDirectAnswers?: boolean;
+  }) {
+    const actualMemory = next?.memory ?? rememberedMemory;
+    const actualWebSearchEnabled = next?.webSearchEnabled ?? webSearchEnabled;
+    const actualCodeModeEnabled = next?.codeModeEnabled ?? codeModeEnabled;
+    const actualPrefersDirectAnswers =
+      next?.prefersDirectAnswers ?? prefersDirectAnswers;
+
+    try {
+      await fetch("/api/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          guestId,
+          memory: actualMemory,
+          webSearchEnabled: actualWebSearchEnabled,
+          codeModeEnabled: actualCodeModeEnabled,
+          prefersDirectAnswers: actualPrefersDirectAnswers
+        })
+      });
+    } catch {}
+  }
+
   async function loadHistory(currentUserIdArg?: string | null) {
     const actualUserId = currentUserIdArg ?? userId;
     const params = new URLSearchParams();
@@ -681,6 +746,7 @@ export default function Home() {
       setUserId(currentUserId);
       setUserEmail(currentUserEmail);
       await loadHistory(currentUserId);
+      await loadPreferences(currentUserId);
     }
 
     init();
@@ -706,6 +772,7 @@ export default function Home() {
       }
 
       await loadHistory(currentUserId);
+      await loadPreferences(currentUserId);
     });
 
     return () => subscription.unsubscribe();
@@ -1049,7 +1116,7 @@ export default function Home() {
 
   async function submitCurrentInput() {
     if (loadingRef.current) return;
-    if (!input.trim() && !selectedFile) return;
+    if (!input.trim() && selectedFiles.length === 0) return;
     await sendMessage();
   }
 
@@ -1260,7 +1327,7 @@ export default function Home() {
         type: "image/jpeg"
       });
 
-      setSelectedFile(capturedFile);
+      setSelectedFiles([capturedFile]);
       closeCamera();
     } catch (error) {
       console.error(error);
@@ -1336,68 +1403,75 @@ export default function Home() {
     return [];
   }
 
-  async function uploadSelectedFile(): Promise<{
-    uploadedMessage: Msg | null;
+  async function uploadSelectedFiles(): Promise<{
+    uploadedMessages: Msg[];
     returnedChatId: string | null;
   }> {
-    if (!selectedFile) {
-      return { uploadedMessage: null, returnedChatId: activeChatIdRef.current };
+    if (selectedFiles.length === 0) {
+      return { uploadedMessages: [], returnedChatId: activeChatIdRef.current };
     }
 
-    const formData = new FormData();
-    formData.append("file", selectedFile);
+    let currentChatId = activeChatIdRef.current;
+    const uploadedMessages: Msg[] = [];
 
-    if (userId) formData.append("userId", userId);
-    if (guestId) formData.append("guestId", guestId);
-    if (activeChatIdRef.current) formData.append("chatId", activeChatIdRef.current);
+    for (const selectedFile of selectedFiles) {
+      const formData = new FormData();
+      formData.append("file", selectedFile);
 
-    const fileType = selectedFile.type || "";
-    const fileName = selectedFile.name.toLowerCase();
-    const shouldRunOcr =
-      fileType.startsWith("image/") ||
-      fileType === "application/pdf" ||
-      fileName.endsWith(".pdf");
+      if (userId) formData.append("userId", userId);
+      if (guestId) formData.append("guestId", guestId);
+      if (currentChatId) formData.append("chatId", currentChatId);
 
-    if (shouldRunOcr) {
-      const ocrImages = await buildOcrImageDataUrls(selectedFile);
-      ocrImages.forEach((img, index) => {
-        if (img && typeof img === "string") {
-          formData.append(`ocrImageDataUrl_${index}`, img);
-        }
+      const fileType = selectedFile.type || "";
+      const fileName = selectedFile.name.toLowerCase();
+      const shouldRunOcr =
+        fileType.startsWith("image/") ||
+        fileType === "application/pdf" ||
+        fileName.endsWith(".pdf");
+
+      if (shouldRunOcr) {
+        const ocrImages = await buildOcrImageDataUrls(selectedFile);
+        ocrImages.forEach((img, index) => {
+          if (img && typeof img === "string") {
+            formData.append(`ocrImageDataUrl_${index}`, img);
+          }
+        });
+      }
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData
       });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "File upload failed.");
+      }
+
+      uploadedMessages.push({
+        role: "user",
+        content: data.messageContent
+      });
+
+      currentChatId = data.chatId || currentChatId;
     }
 
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data?.error || "File upload failed.");
-    }
-
-    const uploadedMessage: Msg = {
-      role: "user",
-      content: data.messageContent
-    };
-
-    setSelectedFile(null);
+    setSelectedFiles([]);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
 
     return {
-      uploadedMessage,
-      returnedChatId: data.chatId || activeChatIdRef.current
+      uploadedMessages,
+      returnedChatId: currentChatId
     };
   }
 
   async function sendMessage(customMessages?: Msg[]) {
     if (loadingRef.current) return;
-    if (!customMessages && !input.trim() && !selectedFile) return;
+    if (!customMessages && !input.trim() && selectedFiles.length === 0) return;
 
     let pendingRetryMessages: Msg[] | null = null;
 
@@ -1410,11 +1484,11 @@ export default function Home() {
       let workingMessages = customMessages ? [...customMessages] : [...messagesRef.current];
       let currentChatId = activeChatIdRef.current;
 
-      if (!customMessages && selectedFile) {
-        const uploadResult = await uploadSelectedFile();
+      if (!customMessages && selectedFiles.length > 0) {
+        const uploadResult = await uploadSelectedFiles();
 
-        if (uploadResult.uploadedMessage) {
-          workingMessages = [...workingMessages, uploadResult.uploadedMessage];
+        if (uploadResult.uploadedMessages.length > 0) {
+          workingMessages = [...workingMessages, ...uploadResult.uploadedMessages];
           setMessages(workingMessages);
           messagesRef.current = workingMessages;
         }
@@ -1517,7 +1591,11 @@ export default function Home() {
           model: resolvedRoute,
           guestId,
           userId,
-          chatId: currentChatId
+          chatId: currentChatId,
+          memory: rememberedMemory,
+          webSearchEnabled,
+          codeModeEnabled,
+          prefersDirectAnswers
         })
       });
 
@@ -1544,6 +1622,9 @@ export default function Home() {
       const assistantReply = data?.reply || "No response.";
       const returnedChatId =
         data?.chatId || res.headers.get("X-Chat-Id") || currentChatId || null;
+      if (typeof data?.rememberedMemory === "string") {
+        setRememberedMemory(data.rememberedMemory);
+      }
 
       if (returnedChatId) {
         setActiveChatId(returnedChatId);
@@ -1685,7 +1766,7 @@ export default function Home() {
     messagesRef.current = [];
     setActiveChatId(null);
     activeChatIdRef.current = null;
-    setSelectedFile(null);
+    setSelectedFiles([]);
     stopSpeaking();
     setMobileActionsOpen(false);
 
@@ -1696,6 +1777,42 @@ export default function Home() {
     if (isMobile) setSidebarOpen(false);
     setVoiceStatus("Wake phrase: Hey Nexa");
     scheduleHandsFreeRestart(500);
+  }
+
+  async function shareCurrentChat() {
+    if (!activeChatIdRef.current) {
+      showToast("Open a chat with messages before sharing.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId: activeChatIdRef.current,
+          userId,
+          guestId
+        })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to share chat.");
+      }
+
+      const shareUrl = `${window.location.origin}${data.shareUrl}`;
+      await navigator.clipboard.writeText(shareUrl);
+      showToast("Share link copied to clipboard.", "success");
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Failed to share chat."
+      );
+    }
+  }
+
+  function applyQuickPrompt(template: string) {
+    setInput(template);
   }
 
   async function copyText(text: string) {
@@ -1786,12 +1903,13 @@ export default function Home() {
   }
 
   const primaryButtonStyle: CSSProperties = {
-    background: "#2b3445",
-    color: "white",
-    border: "1px solid #3b465a",
-    borderRadius: 12,
-    padding: "8px 12px",
-    cursor: "pointer"
+    background: "linear-gradient(135deg, rgba(31,74,116,0.92), rgba(18,41,66,0.96))",
+    color: "#f8fbff",
+    border: "1px solid rgba(120,168,214,0.24)",
+    borderRadius: 14,
+    padding: "9px 13px",
+    cursor: "pointer",
+    boxShadow: "0 10px 24px rgba(5,10,18,0.18)"
   };
 
   const iconButtonStyle: CSSProperties = {
@@ -1809,20 +1927,20 @@ export default function Home() {
   };
 
   const smallButtonStyle: CSSProperties = {
-    background: "#2b3445",
-    color: "white",
-    border: "1px solid #3b465a",
-    borderRadius: 8,
-    padding: "4px 8px",
+    background: "rgba(18,35,58,0.92)",
+    color: "#e8f1ff",
+    border: "1px solid rgba(120,168,214,0.18)",
+    borderRadius: 999,
+    padding: "6px 10px",
     cursor: "pointer",
     fontSize: 12
   };
 
   const dangerButtonStyle: CSSProperties = {
-    background: "#3a1f1f",
+    background: "linear-gradient(135deg, rgba(92,31,31,0.96), rgba(65,22,22,0.96))",
     color: "white",
-    border: "1px solid #5a2d2d",
-    borderRadius: 8,
+    border: "1px solid rgba(250,148,148,0.22)",
+    borderRadius: 12,
     padding: "8px 10px",
     cursor: "pointer",
     fontSize: 12,
@@ -1835,10 +1953,10 @@ export default function Home() {
     alignItems: "center",
     gap: 10,
     width: "100%",
-    background: "#2b3445",
+    background: "rgba(17, 34, 57, 0.98)",
     color: "white",
-    border: "1px solid #3b465a",
-    borderRadius: 12,
+    border: "1px solid rgba(120,168,214,0.18)",
+    borderRadius: 14,
     padding: "12px 14px",
     cursor: "pointer"
   };
@@ -1846,9 +1964,10 @@ export default function Home() {
   const sidebarStyle: CSSProperties = {
     width: isMobile ? "82vw" : 280,
     maxWidth: isMobile ? 320 : 280,
-    background: "#171717",
-    borderRight: "1px solid #2f2f2f",
-    padding: isMobile ? 14 : 12,
+    background:
+      "linear-gradient(180deg, rgba(8,17,31,0.98), rgba(8,14,26,0.96))",
+    borderRight: "1px solid rgba(126,164,206,0.14)",
+    padding: isMobile ? 14 : 16,
     overflowY: "auto",
     flexShrink: 0,
     position: isMobile ? "fixed" : "relative",
@@ -1858,12 +1977,16 @@ export default function Home() {
     zIndex: isMobile ? 40 : "auto",
     display: "flex",
     flexDirection: "column",
-    boxShadow: isMobile ? "10px 0 30px rgba(0,0,0,0.35)" : "none"
+    boxShadow: isMobile
+      ? "18px 0 48px rgba(0,0,0,0.38)"
+      : "inset -1px 0 0 rgba(126,164,206,0.08)"
   };
 
   const bubbleBaseStyle: CSSProperties = {
-    borderRadius: isMobile ? 16 : 18,
-    boxShadow: "0 1px 2px rgba(0,0,0,0.25)"
+    borderRadius: isMobile ? 18 : 22,
+    boxShadow: "0 18px 40px rgba(2,8,16,0.18)",
+    border: "1px solid rgba(126,164,206,0.12)",
+    backdropFilter: "blur(12px)"
   };
 
   return (
@@ -1871,12 +1994,39 @@ export default function Home() {
       style={{
         display: "flex",
         height: "100vh",
-        background: "#212121",
+        background:
+          "radial-gradient(circle at top left, rgba(70,194,255,0.12), transparent 26%), radial-gradient(circle at bottom right, rgba(115,240,198,0.08), transparent 24%), linear-gradient(180deg, #08111f 0%, #050a13 100%)",
         color: "white",
-        fontFamily: "Arial, sans-serif",
+        fontFamily: "var(--font-body)",
         overflow: "hidden"
       }}
     >
+      <div
+        style={{
+          position: "fixed",
+          top: -120,
+          right: -80,
+          width: 300,
+          height: 300,
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(70,194,255,0.22), transparent 68%)",
+          pointerEvents: "none",
+          filter: "blur(6px)"
+        }}
+      />
+      <div
+        style={{
+          position: "fixed",
+          bottom: -140,
+          left: -120,
+          width: 340,
+          height: 340,
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(115,240,198,0.14), transparent 70%)",
+          pointerEvents: "none",
+          filter: "blur(8px)"
+        }}
+      />
       {isMobile && sidebarOpen && (
         <div
           onClick={() => setSidebarOpen(false)}
@@ -2041,8 +2191,9 @@ export default function Home() {
               ...primaryButtonStyle,
               width: "100%",
               marginBottom: 14,
-              background: "#2a2a2a",
-              border: "1px solid #3a3a3a",
+              background:
+                "linear-gradient(135deg, rgba(55,132,196,0.22), rgba(18,35,58,0.96))",
+              border: "1px solid rgba(126,164,206,0.22)",
               minHeight: 44
             }}
             onClick={newChat}
@@ -2062,10 +2213,10 @@ export default function Home() {
               width: "100%",
               boxSizing: "border-box",
               marginBottom: 12,
-              padding: 11,
-              borderRadius: 12,
-              border: "1px solid #3a3a3a",
-              background: "#2a2a2a",
+              padding: 12,
+              borderRadius: 14,
+              border: "1px solid rgba(126,164,206,0.16)",
+              background: "rgba(14,28,47,0.82)",
               color: "white",
               outline: "none"
             }}
@@ -2080,7 +2231,11 @@ export default function Home() {
               marginBottom: 14,
               color: "#cbd5e1",
               textDecoration: "none",
-              fontSize: 14
+              fontSize: 14,
+              padding: "10px 12px",
+              borderRadius: 14,
+              background: "rgba(12, 24, 42, 0.7)",
+              border: "1px solid rgba(126,164,206,0.08)"
             }}
           >
             <SettingsIcon width={18} height={18} />
@@ -2111,16 +2266,23 @@ export default function Home() {
                 style={{
                   padding: 10,
                   marginBottom: 10,
-                  borderRadius: 12,
-                  background: activeChatId === h.id ? "#2a2a2a" : "transparent",
-                  border: "1px solid #2f2f2f"
+                  borderRadius: 16,
+                  background:
+                    activeChatId === h.id
+                      ? "linear-gradient(135deg, rgba(26,58,92,0.92), rgba(16,31,50,0.96))"
+                      : "rgba(9, 18, 32, 0.7)",
+                  border: "1px solid rgba(126,164,206,0.12)",
+                  boxShadow:
+                    activeChatId === h.id
+                      ? "0 16px 32px rgba(2,8,16,0.22)"
+                      : "none"
                 }}
               >
                 <div
                   style={{
                     cursor: "pointer",
                     marginBottom: 8,
-                    color: "#f5f5f5",
+                    color: "#f5fbff",
                     fontWeight: 600,
                     wordBreak: "break-word",
                     fontSize: 14,
@@ -2163,9 +2325,9 @@ export default function Home() {
         <div
           style={{
             padding: isMobile ? "10px 12px" : "14px 18px",
-            borderBottom: "1px solid #2f2f2f",
-            background: "rgba(33,33,33,0.95)",
-            backdropFilter: "blur(12px)",
+            borderBottom: "1px solid rgba(126,164,206,0.14)",
+            background: "rgba(7, 16, 29, 0.72)",
+            backdropFilter: "blur(18px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -2206,10 +2368,12 @@ export default function Home() {
 
             <div
               style={{
-                fontSize: isMobile ? 17 : 20,
+                fontSize: isMobile ? 17 : 22,
                 fontWeight: 700,
                 whiteSpace: "nowrap",
-                flexShrink: 0
+                flexShrink: 0,
+                fontFamily: "var(--font-display)",
+                letterSpacing: "-0.04em"
               }}
             >
               Nexa AI
@@ -2219,10 +2383,10 @@ export default function Home() {
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value as SelectedModel)}
               style={{
-                background: "#2a2a2a",
+                background: "rgba(14,28,47,0.9)",
                 color: "white",
-                border: "1px solid #3a3a3a",
-                borderRadius: 10,
+                border: "1px solid rgba(126,164,206,0.16)",
+                borderRadius: 12,
                 padding: isMobile ? "8px 10px" : "8px 10px",
                 minWidth: isMobile ? 78 : 96,
                 maxWidth: isMobile ? 92 : 120,
@@ -2506,22 +2670,24 @@ export default function Home() {
                 maxWidth: 800,
                 margin: isMobile ? "32px auto 0 auto" : "80px auto 0 auto",
                 textAlign: "center",
-                color: "#cbd5e1",
+                color: "#dce8f5",
                 padding: isMobile ? "0 16px" : "0 20px"
               }}
             >
               <div
                 style={{
-                  fontSize: isMobile ? 24 : 34,
+                  fontSize: isMobile ? 28 : 42,
                   fontWeight: 700,
                   marginBottom: 12,
-                  lineHeight: 1.2
+                  lineHeight: 1.1,
+                  fontFamily: "var(--font-display)",
+                  letterSpacing: "-0.05em"
                 }}
               >
                 How can I help you today?
               </div>
 
-              <div style={{ color: "#9ca3af", fontSize: isMobile ? 14 : 16, lineHeight: 1.6 }}>
+              <div style={{ color: "#9cb0c8", fontSize: isMobile ? 14 : 17, lineHeight: 1.7, maxWidth: 620, margin: "0 auto" }}>
                 One chat for text, code, images, files, camera, voice, and live answers.
               </div>
 
@@ -2531,12 +2697,12 @@ export default function Home() {
                   display: "inline-flex",
                   alignItems: "center",
                   gap: 8,
-                  background: "#1f2937",
-                  border: "1px solid #374151",
+                  background: "rgba(14, 28, 47, 0.9)",
+                  border: "1px solid rgba(126,164,206,0.18)",
                   borderRadius: 999,
-                  padding: "8px 14px",
+                  padding: "10px 16px",
                   fontSize: 13,
-                  color: "#cbd5e1",
+                  color: "#dce8f5",
                   maxWidth: "100%"
                 }}
               >
@@ -2562,7 +2728,7 @@ export default function Home() {
                 style={{
                   marginBottom: 12,
                   fontSize: 12,
-                  color: "#a5b4fc",
+                  color: "#84d9ff",
                   padding: isMobile ? "0 4px" : 0
                 }}
               >
@@ -2597,17 +2763,21 @@ export default function Home() {
                       style={{
                         ...bubbleBaseStyle,
                         maxWidth: isMobile ? "95%" : isUser ? "75%" : "85%",
-                        background: isUser ? "#2f6fed" : "#2a2a2a",
+                        background: isUser
+                          ? "linear-gradient(135deg, rgba(43,109,196,0.96), rgba(27,80,154,0.98))"
+                          : "linear-gradient(180deg, rgba(14,28,47,0.92), rgba(9,18,32,0.96))",
                         color: "white",
-                        padding: isMobile ? "12px 12px" : "14px 16px"
+                        padding: isMobile ? "12px 12px" : "15px 17px"
                       }}
                     >
                       <div
                         style={{
                           fontWeight: 700,
-                          color: isUser ? "#dbeafe" : "#f8fafc",
+                          color: isUser ? "#dff0ff" : "#f8fbff",
                           marginBottom: 8,
-                          fontSize: 12
+                          fontSize: 11,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.08em"
                         }}
                       >
                         {isUser ? "You" : "AI"}
@@ -2721,7 +2891,7 @@ export default function Home() {
                           </button>
                         </div>
                       ) : (
-                        <div style={{ color: "#f3f4f6", lineHeight: 1.65, fontSize: isMobile ? 14 : 15 }}>
+                        <div style={{ color: "#edf4ff", lineHeight: 1.72, fontSize: isMobile ? 14 : 15 }}>
                           {segments.map((segment, index) => {
                             if (segment.type === "code") {
                               return (
@@ -2900,9 +3070,9 @@ export default function Home() {
 
         <div
           style={{
-            borderTop: "1px solid #2f2f2f",
-            background: "rgba(33,33,33,0.98)",
-            backdropFilter: "blur(12px)",
+            borderTop: "1px solid rgba(126,164,206,0.12)",
+            background: "rgba(5, 12, 22, 0.78)",
+            backdropFilter: "blur(20px)",
             padding: isMobile ? "10px 10px calc(10px + env(safe-area-inset-bottom)) 10px" : "16px 20px 20px 20px",
             position: "relative",
             zIndex: isMobile && mobileActionsOpen ? 50 : 1
@@ -2915,36 +3085,42 @@ export default function Home() {
               position: "relative"
             }}
           >
-            {selectedFile && (
+            {selectedFiles.length > 0 && (
               <div
                 style={{
                   marginBottom: 10,
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
+                  flexWrap: "wrap",
                   background: "#2a2a2a",
                   border: "1px solid #3a3a3a",
                   borderRadius: 14,
                   padding: "10px 12px",
-                  width: isMobile ? "100%" : "fit-content",
+                  width: "100%",
                   maxWidth: "100%",
                   boxSizing: "border-box"
                 }}
               >
-                <span
-                  style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    flex: 1
-                  }}
-                >
-                  {selectedFile.name}
-                </span>
+                <span style={{ flex: 1, color: "#dbeafe" }}>{selectedFileLabel}</span>
+                {selectedFiles.slice(0, 3).map((file) => (
+                  <span
+                    key={file.name + file.size}
+                    style={{
+                      background: "#1f2937",
+                      border: "1px solid #334155",
+                      borderRadius: 999,
+                      padding: "4px 8px",
+                      fontSize: 12
+                    }}
+                  >
+                    {file.name}
+                  </span>
+                ))}
 
                 <button
                   onClick={() => {
-                    setSelectedFile(null);
+                    setSelectedFiles([]);
                     if (fileInputRef.current) {
                       fileInputRef.current.value = "";
                     }
@@ -2973,6 +3149,119 @@ export default function Home() {
               Voice language: {getLanguageLabel(voiceLanguage)}
               {selectedVoiceURI ? " • custom voice selected" : ""}
               {handsFreeWakeMode ? " • hands-free on" : " • hands-free off"}
+              {webSearchEnabled ? " • web on" : " • web off"}
+              {codeModeEnabled ? " • code mode on" : ""}
+            </div>
+
+            <div
+              style={{
+                marginBottom: 10,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap"
+              }}
+            >
+              <button
+                type="button"
+                style={{
+                  ...smallButtonStyle,
+                  background: webSearchEnabled ? "#16324f" : "#2b3445"
+                }}
+                onClick={() => {
+                  const next = !webSearchEnabled;
+                  setWebSearchEnabled(next);
+                  void savePreferences({ webSearchEnabled: next });
+                }}
+              >
+                Live / Web search {webSearchEnabled ? "ON" : "OFF"}
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...smallButtonStyle,
+                  background: codeModeEnabled ? "#1f4f3f" : "#2b3445"
+                }}
+                onClick={() => {
+                  const next = !codeModeEnabled;
+                  setCodeModeEnabled(next);
+                  void savePreferences({ codeModeEnabled: next });
+                }}
+              >
+                Code Mode {codeModeEnabled ? "ON" : "OFF"}
+              </button>
+              <button
+                type="button"
+                style={smallButtonStyle}
+                onClick={shareCurrentChat}
+              >
+                Share Chat
+              </button>
+            </div>
+
+            <div
+              style={{
+                marginBottom: 10,
+                display: "flex",
+                gap: 8,
+                flexWrap: "wrap"
+              }}
+            >
+              <button
+                type="button"
+                style={smallButtonStyle}
+                onClick={() =>
+                  applyQuickPrompt("Build startup idea: target users, problem, solution, MVP, pricing, GTM.")
+                }
+              >
+                Build startup idea
+              </button>
+              <button
+                type="button"
+                style={smallButtonStyle}
+                onClick={() =>
+                  applyQuickPrompt("Fix my code. Explain the bug briefly, then give the corrected code.")
+                }
+              >
+                Fix my code
+              </button>
+              <button
+                type="button"
+                style={smallButtonStyle}
+                onClick={() => applyQuickPrompt("Summarize this directly in concise points.")}
+              >
+                Summarize this
+              </button>
+            </div>
+
+            <div
+              style={{
+                marginBottom: 10,
+                background: "#1f1f1f",
+                border: "1px solid #333",
+                borderRadius: 12,
+                padding: 10
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>
+                Remember this about me
+              </div>
+              <textarea
+                value={rememberedMemory}
+                onChange={(e) => setRememberedMemory(e.target.value)}
+                onBlur={() => void savePreferences({ memory: rememberedMemory })}
+                rows={2}
+                placeholder="Example: I am a PM student. I prefer concise answers."
+                style={{
+                  width: "100%",
+                  background: "#111827",
+                  color: "white",
+                  border: "1px solid #374151",
+                  borderRadius: 10,
+                  padding: 10,
+                  resize: "vertical",
+                  boxSizing: "border-box"
+                }}
+              />
             </div>
 
             {retryMessages && (
@@ -3005,11 +3294,11 @@ export default function Home() {
             {isMobile ? (
               <div
                 style={{
-                  background: "#262626",
-                  border: "1px solid #343434",
-                  borderRadius: 18,
+                  background: "linear-gradient(180deg, rgba(11,22,38,0.94), rgba(7,15,26,0.98))",
+                  border: "1px solid rgba(126,164,206,0.14)",
+                  borderRadius: 22,
                   padding: 10,
-                  boxShadow: "0 10px 25px rgba(0,0,0,0.2)"
+                  boxShadow: "0 24px 48px rgba(2,8,16,0.26)"
                 }}
               >
                 <div ref={mobileActionsRef} style={{ position: "relative" }}>
@@ -3020,11 +3309,11 @@ export default function Home() {
                         bottom: 60,
                         left: 0,
                         width: 220,
-                        background: "#1f1f1f",
-                        border: "1px solid #333",
-                        borderRadius: 16,
+                        background: "linear-gradient(180deg, rgba(11,22,38,0.98), rgba(8,17,31,0.98))",
+                        border: "1px solid rgba(126,164,206,0.14)",
+                        borderRadius: 18,
                         padding: 10,
-                        boxShadow: "0 16px 40px rgba(0,0,0,0.4)",
+                        boxShadow: "0 22px 44px rgba(0,0,0,0.34)",
                         zIndex: 50,
                         display: "flex",
                         flexDirection: "column",
@@ -3034,9 +3323,10 @@ export default function Home() {
                       <input
                         ref={fileInputRef}
                         type="file"
+                        multiple
                         onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          setSelectedFile(file);
+                          const files = Array.from(e.target.files || []);
+                          setSelectedFiles(files);
                           setMobileActionsOpen(false);
                         }}
                         style={{ display: "none" }}
@@ -3150,10 +3440,10 @@ export default function Home() {
                       style={{
                         flex: 1,
                         padding: "12px 14px",
-                        background: "#1f1f1f",
+                        background: "rgba(8,18,31,0.94)",
                         color: "white",
-                        border: "1px solid #383838",
-                        borderRadius: 14,
+                        border: "1px solid rgba(126,164,206,0.14)",
+                        borderRadius: 16,
                         outline: "none",
                         resize: "none",
                         minHeight: 48,
@@ -3166,8 +3456,8 @@ export default function Home() {
                       placeholder={
                         isListening
                           ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
-                          : selectedFile
-                            ? "Ask about the file/photo..."
+                          : selectedFiles.length > 0
+                            ? "Ask about the files/photos..."
                             : "Message Nexa AI"
                       }
                     />
@@ -3221,9 +3511,10 @@ export default function Home() {
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   onChange={(e) => {
-                    const file = e.target.files?.[0] || null;
-                    setSelectedFile(file);
+                    const files = Array.from(e.target.files || []);
+                    setSelectedFiles(files);
                   }}
                   style={{ display: "none" }}
                 />
@@ -3309,10 +3600,10 @@ export default function Home() {
                   style={{
                     flex: 1,
                     padding: 14,
-                    background: "#2a2a2a",
+                    background: "rgba(11,22,38,0.9)",
                     color: "white",
-                    border: "1px solid #3a3a3a",
-                    borderRadius: 16,
+                    border: "1px solid rgba(126,164,206,0.16)",
+                    borderRadius: 18,
                     outline: "none",
                     resize: "none",
                     minHeight: 52,
@@ -3322,8 +3613,8 @@ export default function Home() {
                   placeholder={
                     isListening
                       ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
-                      : selectedFile
-                        ? "Ask something about the file/photo, or press Send to upload only"
+                      : selectedFiles.length > 0
+                        ? "Ask about the files/photos, or press Send to upload only"
                         : "Message Nexa AI"
                   }
                 />

@@ -12,6 +12,7 @@ import {
   validateMode,
   validateModel
 } from "@/lib/api-guards";
+import { getUserPreferences, trackAnalyticsEvent } from "@/lib/server-data";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -28,8 +29,6 @@ const anthropic = new Anthropic({
   apiKey: anthropicKey
 });
 
-const GUEST_CHAT_LIMIT = 50;
-const USER_CHAT_LIMIT = 500;
 const DAILY_CHAT_LIMIT = 20;
 
 type ChatMessage = {
@@ -183,6 +182,106 @@ function buildOpenAIInput(messages: ChatMessage[], systemPrompt: string) {
   return lines.join("\n");
 }
 
+function buildPreferenceInstructions(params: {
+  memory: string;
+  codeModeEnabled: boolean;
+  prefersDirectAnswers: boolean;
+}) {
+  const lines: string[] = [];
+
+  if (params.memory.trim()) {
+    lines.push("Remembered user context:");
+    lines.push(params.memory.trim());
+    lines.push("");
+  }
+
+  if (params.codeModeEnabled) {
+    lines.push("Code Mode is ON.");
+    lines.push("Prioritize code, debugging, architecture, and implementation details.");
+    lines.push("");
+  }
+
+  if (params.prefersDirectAnswers) {
+    lines.push("Answer directly.");
+    lines.push("Keep formatting clean, minimal, and low-noise.");
+    lines.push("Do not add unnecessary markdown headings or filler.");
+  }
+
+  return lines.join("\n");
+}
+
+function extractRememberableMemory(message: string) {
+  const text = message.trim().replace(/\s+/g, " ");
+  const lower = text.toLowerCase();
+
+  if (!text || text.length > 220) return null;
+
+  const explicitRememberPrefixes = [
+    "remember this about me",
+    "remember that",
+    "remember i am",
+    "remember i'm",
+    "please remember",
+    "for future chats remember"
+  ];
+
+  if (explicitRememberPrefixes.some((prefix) => lower.startsWith(prefix))) {
+    return text;
+  }
+
+  const personalContextPrefixes = [
+    "i am ",
+    "i'm ",
+    "my name is ",
+    "i work as ",
+    "i work at ",
+    "i study ",
+    "i am a ",
+    "i am an ",
+    "i prefer ",
+    "my goal is ",
+    "my goals are "
+  ];
+
+  if (personalContextPrefixes.some((prefix) => lower.startsWith(prefix))) {
+    return text;
+  }
+
+  return null;
+}
+
+async function rememberUserContext(ownerId: string, latestUserMessage: string) {
+  const memoryCandidate = extractRememberableMemory(latestUserMessage);
+  if (!memoryCandidate) return null;
+
+  const existing = await getUserPreferences(ownerId);
+  const lines = existing.memory
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const alreadySaved = lines.some(
+    (line) => line.toLowerCase() === memoryCandidate.toLowerCase()
+  );
+
+  if (alreadySaved) {
+    return existing.memory;
+  }
+
+  const nextMemory = [...lines, memoryCandidate].join("\n").slice(0, 2000);
+
+  await supabaseAdmin.from("user_preferences").upsert({
+    owner_id: ownerId,
+    memory: nextMemory,
+    prefers_direct_answers: existing.prefers_direct_answers,
+    web_search_enabled: existing.web_search_enabled,
+    code_mode_enabled: existing.code_mode_enabled,
+    updated_at: new Date().toISOString()
+  });
+
+  return nextMemory;
+}
+
 async function ensureChatOwnership(
   activeChatId: string,
   ownerId: string
@@ -297,7 +396,11 @@ export async function POST(req: Request) {
       model = "openai",
       userId = null,
       guestId = null,
-      chatId = null
+      chatId = null,
+      memory = "",
+      webSearchEnabled = true,
+      codeModeEnabled = false,
+      prefersDirectAnswers = true
     } = body;
 
     const ownerId = requireOwnerId(userId, guestId);
@@ -311,16 +414,8 @@ export async function POST(req: Request) {
       windowMs: 60_000
     });
 
-    const usage = await incrementChatUsage(ownerId);
+    await incrementChatUsage(ownerId);
     const dailyUsage = await incrementDailyChatUsage(ownerId);
-    const limit = userId ? USER_CHAT_LIMIT : GUEST_CHAT_LIMIT;
-
-    if (usage.count > limit) {
-      return NextResponse.json(
-        { error: `Chat usage limit reached (${limit}).` },
-        { status: 403 }
-      );
-    }
 
     if (dailyUsage.count > DAILY_CHAT_LIMIT) {
       return NextResponse.json(
@@ -359,9 +454,50 @@ export async function POST(req: Request) {
     activeChatId = created.chatId;
 
     const latestUserMessage = getLatestUserMessage(normalizedMessages);
-    const systemPrompt = systemPromptForMode(validatedMode as never);
+    const autoRememberedMemory = await rememberUserContext(
+      ownerId,
+      latestUserMessage
+    );
+    const savedPreferences = await getUserPreferences(ownerId);
+    const effectiveMemory =
+      typeof memory === "string" && memory.trim().length > 0
+        ? memory.trim()
+        : autoRememberedMemory || savedPreferences.memory || "";
+    const effectiveCodeMode =
+      typeof codeModeEnabled === "boolean"
+        ? codeModeEnabled
+        : savedPreferences.code_mode_enabled;
+    const effectiveDirectAnswers =
+      typeof prefersDirectAnswers === "boolean"
+        ? prefersDirectAnswers
+        : savedPreferences.prefers_direct_answers;
+    const effectiveWebSearch =
+      typeof webSearchEnabled === "boolean"
+        ? webSearchEnabled
+        : savedPreferences.web_search_enabled;
+    const systemPrompt = [
+      systemPromptForMode(validatedMode as never),
+      buildPreferenceInstructions({
+        memory: effectiveMemory,
+        codeModeEnabled: effectiveCodeMode,
+        prefersDirectAnswers: effectiveDirectAnswers
+      })
+    ]
+      .filter(Boolean)
+      .join("\n\n");
 
     await saveUserMessageIfNeeded(activeChatId, latestUserMessage);
+    await trackAnalyticsEvent({
+      ownerId,
+      eventName: "chat_request",
+      chatId: activeChatId,
+      metadata: {
+        model: validatedModel,
+        mode: validatedMode,
+        webSearchEnabled: effectiveWebSearch,
+        codeModeEnabled: effectiveCodeMode
+      }
+    });
 
     if (validatedModel === "claude") {
       if (!anthropicKey) {
@@ -391,11 +527,21 @@ export async function POST(req: Request) {
           .trim() || "No response.";
 
       await saveAssistantMessage(activeChatId, assistantReply);
+      await trackAnalyticsEvent({
+        ownerId,
+        eventName: "chat_success",
+        chatId: activeChatId,
+        metadata: {
+          model: validatedModel,
+          mode: validatedMode
+        }
+      });
 
       return NextResponse.json(
         {
           reply: assistantReply,
-          chatId: activeChatId
+          chatId: activeChatId,
+          rememberedMemory: effectiveMemory
         },
         {
           headers: {
@@ -405,7 +551,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const useLiveWeb = shouldUseLiveWebSearch(latestUserMessage);
+    const useLiveWeb = effectiveWebSearch && shouldUseLiveWebSearch(latestUserMessage);
     const encoder = new TextEncoder();
 
     const responseStream = await openai.responses.create(
@@ -428,7 +574,8 @@ export async function POST(req: Request) {
           encoder.encode(
             createSseEvent("meta", {
               chatId: activeChatId,
-              liveDataUsed: useLiveWeb
+              liveDataUsed: useLiveWeb,
+              rememberedMemory: effectiveMemory
             })
           )
         );
@@ -447,18 +594,40 @@ export async function POST(req: Request) {
 
           const finalReply = assistantReply.trim() || "No response.";
           await saveAssistantMessage(activeChatId, finalReply);
+          await trackAnalyticsEvent({
+            ownerId,
+            eventName: "chat_success",
+            chatId: activeChatId,
+            metadata: {
+              model: validatedModel,
+              mode: validatedMode,
+              liveDataUsed: useLiveWeb
+            }
+          });
 
           controller.enqueue(
             encoder.encode(
               createSseEvent("done", {
                 reply: finalReply,
                 chatId: activeChatId,
-                liveDataUsed: useLiveWeb
+                liveDataUsed: useLiveWeb,
+                rememberedMemory: effectiveMemory
               })
             )
           );
         } catch (streamError) {
           console.error("OpenAI streaming error:", streamError);
+          await trackAnalyticsEvent({
+            ownerId,
+            eventName: "chat_error",
+            chatId: activeChatId,
+            metadata: {
+              reason:
+                streamError instanceof Error
+                  ? streamError.message
+                  : "Streaming failure"
+            }
+          });
           controller.enqueue(
             encoder.encode(
               createSseEvent("error", {

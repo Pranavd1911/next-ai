@@ -7,6 +7,11 @@ export default function SettingsPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analytics, setAnalytics] = useState<{
+    dailyUsers: number;
+    messagesPerUser: number;
+    dropOffPoints: Array<{ createdAt: string; reason: string }>;
+  } | null>(null);
 
   useEffect(() => {
     async function init() {
@@ -16,6 +21,13 @@ export default function SettingsPage() {
 
       setUserId(user?.id || null);
       setUserEmail(user?.email || null);
+      try {
+        const analyticsRes = await fetch("/api/analytics", { cache: "no-store" });
+        const analyticsData = await analyticsRes.json();
+        if (analyticsRes.ok) {
+          setAnalytics(analyticsData);
+        }
+      } catch {}
       setLoading(false);
     }
 
@@ -138,6 +150,51 @@ export default function SettingsPage() {
               <button onClick={handleLogout} style={dangerButtonStyle}>
                 Logout
               </button>
+            </div>
+          )}
+        </div>
+
+        <div style={cardStyle}>
+          <h2 style={{ marginTop: 0, marginBottom: 16 }}>Analytics Dashboard</h2>
+
+          {!analytics ? (
+            <div style={{ color: "#cbd5e1" }}>Loading analytics...</div>
+          ) : (
+            <div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+                <div style={infoBoxStyle}>
+                  <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>
+                    Daily users
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>{analytics.dailyUsers}</div>
+                </div>
+
+                <div style={infoBoxStyle}>
+                  <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>
+                    Messages / user
+                  </div>
+                  <div style={{ fontSize: 24, fontWeight: 700 }}>
+                    {analytics.messagesPerUser}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+                Recent drop-off points
+              </div>
+
+              {analytics.dropOffPoints.length === 0 ? (
+                <div style={{ color: "#cbd5e1" }}>No recent drop-off points.</div>
+              ) : (
+                analytics.dropOffPoints.map((point) => (
+                  <div key={`${point.createdAt}-${point.reason}`} style={infoBoxStyle}>
+                    <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 6 }}>
+                      {new Date(point.createdAt).toLocaleString()}
+                    </div>
+                    <div>{point.reason}</div>
+                  </div>
+                ))
+              )}
             </div>
           )}
         </div>
