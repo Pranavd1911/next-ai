@@ -276,6 +276,10 @@ async function saveAssistantMessage(
   });
 }
 
+function createSseEvent(type: string, data: Record<string, unknown>) {
+  return `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
 export async function POST(req: Request) {
   try {
     if (!supabaseUrl || !serviceRoleKey || !openaiKey) {
@@ -402,29 +406,85 @@ export async function POST(req: Request) {
     }
 
     const useLiveWeb = shouldUseLiveWebSearch(latestUserMessage);
+    const encoder = new TextEncoder();
 
-    const openaiResponse = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: buildOpenAIInput(normalizedMessages, systemPrompt),
-      tools: useLiveWeb ? [{ type: "web_search_preview" }] : []
-    });
-
-    const assistantReply = (openaiResponse.output_text || "No response.").trim();
-
-    await saveAssistantMessage(activeChatId, assistantReply);
-
-    return NextResponse.json(
+    const responseStream = await openai.responses.create(
       {
-        reply: assistantReply,
-        chatId: activeChatId,
-        liveDataUsed: useLiveWeb
+        model: "gpt-4.1-mini",
+        input: buildOpenAIInput(normalizedMessages, systemPrompt),
+        tools: useLiveWeb ? [{ type: "web_search_preview" }] : [],
+        stream: true
       },
       {
-        headers: {
-          "X-Chat-Id": String(activeChatId)
-        }
+        signal: req.signal
       }
     );
+
+    let assistantReply = "";
+
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            createSseEvent("meta", {
+              chatId: activeChatId,
+              liveDataUsed: useLiveWeb
+            })
+          )
+        );
+
+        try {
+          for await (const event of responseStream) {
+            if (event.type === "response.output_text.delta") {
+              const delta = event.delta || "";
+              if (!delta) continue;
+              assistantReply += delta;
+              controller.enqueue(
+                encoder.encode(createSseEvent("delta", { delta }))
+              );
+            }
+          }
+
+          const finalReply = assistantReply.trim() || "No response.";
+          await saveAssistantMessage(activeChatId, finalReply);
+
+          controller.enqueue(
+            encoder.encode(
+              createSseEvent("done", {
+                reply: finalReply,
+                chatId: activeChatId,
+                liveDataUsed: useLiveWeb
+              })
+            )
+          );
+        } catch (streamError) {
+          console.error("OpenAI streaming error:", streamError);
+          controller.enqueue(
+            encoder.encode(
+              createSseEvent("error", {
+                error: "Streaming failed. Please try again."
+              })
+            )
+          );
+        } finally {
+          controller.close();
+        }
+      },
+      cancel() {
+        if ("controller" in responseStream && responseStream.controller) {
+          responseStream.controller.abort();
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Chat-Id": String(activeChatId)
+      }
+    });
   } catch (error) {
     console.error("POST /api/chat error:", error);
 

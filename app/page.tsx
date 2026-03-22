@@ -35,6 +35,12 @@ type ToastItem = {
   message: string;
 };
 
+type StreamChunkEvent =
+  | { type: "meta"; chatId?: string; liveDataUsed?: boolean }
+  | { type: "delta"; delta?: string }
+  | { type: "done"; reply?: string; chatId?: string; liveDataUsed?: boolean }
+  | { type: "error"; error?: string };
+
 type ChatItem = {
   id: string;
   title: string;
@@ -324,6 +330,121 @@ export default function Home() {
     }
 
     return "Something went wrong. Your latest message is safe locally, and you can retry.";
+  }
+
+  async function consumeChatStream(
+    res: Response,
+    nextMessages: Msg[],
+    currentChatId: string | null
+  ) {
+    if (!res.body) {
+      throw new Error("Streaming response body was empty.");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let streamedReply = "";
+    let finalChatId = currentChatId;
+    let liveDataUsed = false;
+
+    const applyAssistantText = (text: string) => {
+      const updated = [...nextMessages, { role: "assistant", content: text }];
+      setMessages(updated);
+      messagesRef.current = updated;
+    };
+
+    applyAssistantText("");
+
+    const processBlock = (block: string) => {
+      const lines = block.split("\n");
+      const eventLine = lines.find((line) => line.startsWith("event: "));
+      const dataLine = lines.find((line) => line.startsWith("data: "));
+
+      if (!eventLine || !dataLine) return;
+
+      const eventType = eventLine.slice(7).trim();
+      const payload = JSON.parse(dataLine.slice(6)) as StreamChunkEvent;
+
+      if (eventType === "meta") {
+        const metaPayload = payload as Extract<StreamChunkEvent, { type: "meta" }>;
+
+        if (metaPayload.chatId) {
+          finalChatId = metaPayload.chatId;
+          setActiveChatId(metaPayload.chatId);
+          activeChatIdRef.current = metaPayload.chatId;
+        }
+
+        liveDataUsed = !!metaPayload.liveDataUsed;
+        return;
+      }
+
+      if (eventType === "delta") {
+        const deltaPayload = payload as Extract<StreamChunkEvent, { type: "delta" }>;
+        streamedReply += deltaPayload.delta || "";
+        applyAssistantText(streamedReply);
+        return;
+      }
+
+      if (eventType === "error") {
+        const errorPayload = payload as Extract<StreamChunkEvent, { type: "error" }>;
+        throw new Error(errorPayload.error || "Streaming failed.");
+      }
+
+      if (eventType === "done") {
+        const donePayload = payload as Extract<StreamChunkEvent, { type: "done" }>;
+        streamedReply = donePayload.reply || streamedReply;
+        if (donePayload.chatId) {
+          finalChatId = donePayload.chatId;
+          setActiveChatId(donePayload.chatId);
+          activeChatIdRef.current = donePayload.chatId;
+        }
+        liveDataUsed = !!donePayload.liveDataUsed;
+        applyAssistantText(streamedReply);
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      while (buffer.includes("\n\n")) {
+        const boundary = buffer.indexOf("\n\n");
+        const block = buffer.slice(0, boundary).trim();
+        buffer = buffer.slice(boundary + 2);
+
+        if (block) {
+          processBlock(block);
+        }
+      }
+    }
+
+    if (streamedReply.trim().length === 0) {
+      throw new Error("The assistant returned an empty response.");
+    }
+
+    if (liveDataUsed) {
+      setVoiceStatus("Live data used for this answer");
+    } else {
+      setVoiceStatus("Answer generated");
+    }
+
+    if (voiceAssistantRef.current && streamedReply) {
+      speakText(streamedReply);
+    } else {
+      scheduleHandsFreeRestart(700);
+    }
+
+    setRetryMessages(null);
+    await loadHistory();
+
+    return {
+      finalReply: streamedReply,
+      finalChatId
+    };
   }
 
   useEffect(() => {
@@ -1399,6 +1520,13 @@ export default function Home() {
           chatId: currentChatId
         })
       });
+
+      const contentType = res.headers.get("content-type") || "";
+
+      if (res.ok && contentType.includes("text/event-stream")) {
+        await consumeChatStream(res, nextMessages, currentChatId);
+        return;
+      }
 
       const data = await res.json();
 
