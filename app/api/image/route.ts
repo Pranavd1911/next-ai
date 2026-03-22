@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import {
+  enforceMemoryRateLimit,
+  getFriendlyApiError,
+  normalizeMessages,
+  requireOwnerId
+} from "@/lib/api-guards";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -14,6 +20,7 @@ const openai = new OpenAI({
 
 const GUEST_IMAGE_LIMIT = 10;
 const USER_IMAGE_LIMIT = 100;
+const DAILY_IMAGE_LIMIT = 5;
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -49,29 +56,38 @@ async function incrementImageUsage(ownerId: string) {
   return { count: nextCount };
 }
 
-function normalizeMessages(messages: unknown[]): ChatMessage[] {
-  if (!Array.isArray(messages)) return [];
+async function incrementDailyImageUsage(ownerId: string) {
+  const today = new Date().toISOString().slice(0, 10);
 
-  return messages
-    .filter((m): m is { role: string; content: string } => {
-      return (
-        !!m &&
-        typeof m === "object" &&
-        "role" in m &&
-        "content" in m &&
-        typeof (m as { role: unknown }).role === "string" &&
-        typeof (m as { content: unknown }).content === "string"
-      );
+  const { data: existing } = await supabaseAdmin
+    .from("usage_daily")
+    .select("owner_id, usage_date, image_count")
+    .eq("owner_id", ownerId)
+    .eq("usage_date", today)
+    .maybeSingle();
+
+  if (!existing) {
+    await supabaseAdmin.from("usage_daily").insert({
+      owner_id: ownerId,
+      usage_date: today,
+      chat_count: 0,
+      image_count: 1
+    });
+
+    return { count: 1 };
+  }
+
+  const nextCount = (existing.image_count || 0) + 1;
+
+  await supabaseAdmin
+    .from("usage_daily")
+    .update({
+      image_count: nextCount
     })
-    .filter(
-      (m) =>
-        (m.role === "user" || m.role === "assistant" || m.role === "system") &&
-        m.content.trim().length > 0
-    )
-    .map((m) => ({
-      role: m.role as "system" | "user" | "assistant",
-      content: m.content
-    }));
+    .eq("owner_id", ownerId)
+    .eq("usage_date", today);
+
+  return { count: nextCount };
 }
 
 function buildImagePrompt(messages: ChatMessage[]) {
@@ -103,30 +119,31 @@ export async function POST(req: Request) {
       chatId = null
     } = body;
 
-    const ownerId = userId || guestId;
+    const ownerId = requireOwnerId(userId, guestId);
+    const normalizedMessages = normalizeMessages(messages) as ChatMessage[];
 
-    if (!ownerId) {
-      return NextResponse.json(
-        { error: "Missing userId or guestId." },
-        { status: 400 }
-      );
-    }
-
-    const normalizedMessages = normalizeMessages(messages);
-
-    if (normalizedMessages.length === 0) {
-      return NextResponse.json(
-        { error: "Messages are required." },
-        { status: 400 }
-      );
-    }
+    enforceMemoryRateLimit({
+      key: `image:${ownerId}`,
+      limit: 4,
+      windowMs: 60_000
+    });
 
     const usage = await incrementImageUsage(ownerId);
+    const dailyUsage = await incrementDailyImageUsage(ownerId);
     const limit = userId ? USER_IMAGE_LIMIT : GUEST_IMAGE_LIMIT;
 
     if (usage.count > limit) {
       return NextResponse.json(
         { error: `Image usage limit reached (${limit}).` },
+        { status: 403 }
+      );
+    }
+
+    if (dailyUsage.count > DAILY_IMAGE_LIMIT) {
+      return NextResponse.json(
+        {
+          error: `Daily image limit reached. You can generate up to ${DAILY_IMAGE_LIMIT} images per day.`
+        },
         { status: 403 }
       );
     }
@@ -234,14 +251,14 @@ export async function POST(req: Request) {
   } catch (error) {
     console.error("POST /api/image error:", error);
 
+    const friendly = getFriendlyApiError(
+      error,
+      "Image generation is unavailable right now. Please try again."
+    );
+
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to generate image."
-      },
-      { status: 500 }
+      { error: friendly.message },
+      { status: friendly.status }
     );
   }
 }

@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  MAX_OCR_IMAGES,
+  getFriendlyApiError,
+  requireOwnerId,
+  validateFile
+} from "@/lib/api-guards";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -107,14 +113,7 @@ export async function POST(req: Request) {
     const guestId = (formData.get("guestId") as string) || null;
     let chatId = (formData.get("chatId") as string) || null;
 
-    const ownerId = userId || guestId;
-
-    if (!ownerId) {
-      return NextResponse.json(
-        { error: "Missing userId or guestId." },
-        { status: 400 }
-      );
-    }
+    const ownerId = requireOwnerId(userId, guestId);
 
     if (!file) {
       return NextResponse.json(
@@ -123,14 +122,16 @@ export async function POST(req: Request) {
       );
     }
 
+    validateFile(file);
+
     // ------------------------
     // GET MULTIPLE OCR IMAGES
     // ------------------------
     const ocrImages: string[] = [];
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < MAX_OCR_IMAGES; i++) {
       const img = formData.get(`ocrImageDataUrl_${i}`) as string;
-      if (img) ocrImages.push(img);
+      if (img && img.startsWith("data:image/")) ocrImages.push(img);
     }
 
     console.log("OCR images received:", ocrImages.length);
@@ -138,6 +139,28 @@ export async function POST(req: Request) {
     // ------------------------
     // CREATE CHAT IF NEEDED
     // ------------------------
+    if (chatId) {
+      const { data: existingChat, error: chatError } = await supabaseAdmin
+        .from("chats")
+        .select("id, user_id")
+        .eq("id", chatId)
+        .single();
+
+      if (chatError || !existingChat) {
+        return NextResponse.json(
+          { error: "Chat not found." },
+          { status: 404 }
+        );
+      }
+
+      if (existingChat.user_id !== ownerId) {
+        return NextResponse.json(
+          { error: "Unauthorized chat access." },
+          { status: 403 }
+        );
+      }
+    }
+
     if (!chatId) {
       const { data: newChat, error: chatError } = await supabaseAdmin
         .from("chats")
@@ -251,11 +274,14 @@ export async function POST(req: Request) {
       messageContent
     });
   } catch (error) {
+    const friendly = getFriendlyApiError(
+      error,
+      "File upload failed. Please try a smaller supported file."
+    );
+
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "File upload failed."
-      },
-      { status: 500 }
+      { error: friendly.message },
+      { status: friendly.status }
     );
   }
 }

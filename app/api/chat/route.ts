@@ -3,6 +3,15 @@ import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { systemPromptForMode } from "@/lib/modes";
+import {
+  ApiValidationError,
+  enforceMemoryRateLimit,
+  getFriendlyApiError,
+  normalizeMessages,
+  requireOwnerId,
+  validateMode,
+  validateModel
+} from "@/lib/api-guards";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -21,9 +30,15 @@ const anthropic = new Anthropic({
 
 const GUEST_CHAT_LIMIT = 50;
 const USER_CHAT_LIMIT = 500;
+const DAILY_CHAT_LIMIT = 20;
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
+  content: string;
+};
+
+type AnthropicChatMessage = {
+  role: "user" | "assistant";
   content: string;
 };
 
@@ -56,29 +71,209 @@ async function incrementChatUsage(ownerId: string) {
   return { count: nextCount };
 }
 
-function normalizeMessages(messages: unknown[]): ChatMessage[] {
-  if (!Array.isArray(messages)) return [];
+async function incrementDailyChatUsage(ownerId: string) {
+  const today = new Date().toISOString().slice(0, 10);
 
-  return messages
-    .filter((m): m is { role: string; content: string } => {
-      return (
-        !!m &&
-        typeof m === "object" &&
-        "role" in m &&
-        "content" in m &&
-        typeof (m as { role: unknown }).role === "string" &&
-        typeof (m as { content: unknown }).content === "string"
-      );
+  const { data: existing } = await supabaseAdmin
+    .from("usage_daily")
+    .select("owner_id, usage_date, chat_count")
+    .eq("owner_id", ownerId)
+    .eq("usage_date", today)
+    .maybeSingle();
+
+  if (!existing) {
+    await supabaseAdmin.from("usage_daily").insert({
+      owner_id: ownerId,
+      usage_date: today,
+      chat_count: 1,
+      image_count: 0
+    });
+
+    return { count: 1 };
+  }
+
+  const nextCount = (existing.chat_count || 0) + 1;
+
+  await supabaseAdmin
+    .from("usage_daily")
+    .update({
+      chat_count: nextCount
     })
-    .filter(
-      (m) =>
-        (m.role === "user" || m.role === "assistant" || m.role === "system") &&
-        m.content.trim().length > 0
-    )
+    .eq("owner_id", ownerId)
+    .eq("usage_date", today);
+
+  return { count: nextCount };
+}
+
+function toAnthropicMessages(messages: ChatMessage[]): AnthropicChatMessage[] {
+  return messages.flatMap((m): AnthropicChatMessage[] => {
+    if (m.role === "user" || m.role === "assistant") {
+      return [
+        {
+          role: m.role,
+          content: m.content
+        }
+      ];
+    }
+    return [];
+  });
+}
+
+function getLatestUserMessage(messages: ChatMessage[]) {
+  return [...messages].reverse().find((m) => m.role === "user")?.content || "";
+}
+
+function shouldUseLiveWebSearch(text: string) {
+  const q = text.toLowerCase().trim();
+
+  const liveKeywords = [
+    "weather",
+    "temperature",
+    "forecast",
+    "news",
+    "today",
+    "current",
+    "currently",
+    "latest",
+    "recent",
+    "recently",
+    "stock",
+    "share price",
+    "market",
+    "score",
+    "match",
+    "game",
+    "flight",
+    "traffic",
+    "live",
+    "update",
+    "updates",
+    "breaking",
+    "what is happening",
+    "who is the current",
+    "who won",
+    "bitcoin price",
+    "ethereum price"
+  ];
+
+  return liveKeywords.some((k) => q.includes(k));
+}
+
+function buildOpenAIInput(messages: ChatMessage[], systemPrompt: string) {
+  const compactMessages = messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => ({
-      role: m.role as "system" | "user" | "assistant",
+      role: m.role,
       content: m.content
     }));
+
+  const lines: string[] = [];
+  lines.push(`SYSTEM: ${systemPrompt}`);
+  lines.push("");
+
+  for (const m of compactMessages) {
+    lines.push(`${m.role.toUpperCase()}: ${m.content}`);
+    lines.push("");
+  }
+
+  lines.push(
+    "Answer the latest user request helpfully. If current/live information is needed and web search is available, use it."
+  );
+
+  return lines.join("\n");
+}
+
+async function ensureChatOwnership(
+  activeChatId: string,
+  ownerId: string
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { data: existingChat, error: existingChatError } = await supabaseAdmin
+    .from("chats")
+    .select("id, user_id")
+    .eq("id", activeChatId)
+    .single();
+
+  if (existingChatError || !existingChat) {
+    return { ok: false, status: 404, error: "Chat not found." };
+  }
+
+  if (existingChat.user_id !== ownerId) {
+    return { ok: false, status: 403, error: "Unauthorized chat access." };
+  }
+
+  return { ok: true };
+}
+
+async function createChatIfNeeded(
+  activeChatId: string | null,
+  ownerId: string,
+  normalizedMessages: ChatMessage[]
+): Promise<{ chatId: string } | { error: string; status: number }> {
+  if (activeChatId) {
+    return { chatId: activeChatId };
+  }
+
+  const firstUserMessage =
+    normalizedMessages.find((m) => m.role === "user")?.content || "New Chat";
+
+  const { data: newChat, error: chatError } = await supabaseAdmin
+    .from("chats")
+    .insert({
+      user_id: ownerId,
+      title: String(firstUserMessage).slice(0, 50)
+    })
+    .select()
+    .single();
+
+  if (chatError || !newChat) {
+    return {
+      error: chatError?.message || "Failed to create chat.",
+      status: 500
+    };
+  }
+
+  return { chatId: newChat.id };
+}
+
+async function saveUserMessageIfNeeded(
+  activeChatId: string,
+  latestUserMessage: string
+) {
+  if (!latestUserMessage.trim()) return;
+
+  const { data: lastMessage } = await supabaseAdmin
+    .from("messages")
+    .select("role, content")
+    .eq("chat_id", activeChatId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (
+    lastMessage?.role === "user" &&
+    lastMessage.content.trim() === latestUserMessage.trim()
+  ) {
+    return;
+  }
+
+  await supabaseAdmin.from("messages").insert({
+    chat_id: activeChatId,
+    role: "user",
+    content: latestUserMessage
+  });
+}
+
+async function saveAssistantMessage(
+  activeChatId: string,
+  assistantReply: string
+) {
+  if (!assistantReply.trim()) return;
+
+  await supabaseAdmin.from("messages").insert({
+    chat_id: activeChatId,
+    role: "assistant",
+    content: assistantReply
+  });
 }
 
 export async function POST(req: Request) {
@@ -101,25 +296,19 @@ export async function POST(req: Request) {
       chatId = null
     } = body;
 
-    const ownerId = userId || guestId;
+    const ownerId = requireOwnerId(userId, guestId);
+    const normalizedMessages = normalizeMessages(messages) as ChatMessage[];
+    const validatedMode = validateMode(mode);
+    const validatedModel = validateModel(model);
 
-    if (!ownerId) {
-      return NextResponse.json(
-        { error: "Missing userId or guestId." },
-        { status: 400 }
-      );
-    }
-
-    const normalizedMessages = normalizeMessages(messages);
-
-    if (normalizedMessages.length === 0) {
-      return NextResponse.json(
-        { error: "Messages are required." },
-        { status: 400 }
-      );
-    }
+    enforceMemoryRateLimit({
+      key: `chat:${ownerId}`,
+      limit: 10,
+      windowMs: 60_000
+    });
 
     const usage = await incrementChatUsage(ownerId);
+    const dailyUsage = await incrementDailyChatUsage(ownerId);
     const limit = userId ? USER_CHAT_LIMIT : GUEST_CHAT_LIMIT;
 
     if (usage.count > limit) {
@@ -129,197 +318,124 @@ export async function POST(req: Request) {
       );
     }
 
+    if (dailyUsage.count > DAILY_CHAT_LIMIT) {
+      return NextResponse.json(
+        {
+          error: `Free plan limit reached. You can send up to ${DAILY_CHAT_LIMIT} messages per day.`
+        },
+        { status: 403 }
+      );
+    }
+
     let activeChatId = chatId as string | null;
 
     if (activeChatId) {
-      const { data: existingChat, error: existingChatError } = await supabaseAdmin
-        .from("chats")
-        .select("id, user_id")
-        .eq("id", activeChatId)
-        .single();
-
-      if (existingChatError || !existingChat) {
+      const ownership = await ensureChatOwnership(activeChatId, ownerId);
+      if (!ownership.ok) {
         return NextResponse.json(
-          { error: "Chat not found." },
-          { status: 404 }
-        );
-      }
-
-      if (existingChat.user_id !== ownerId) {
-        return NextResponse.json(
-          { error: "Unauthorized chat access." },
-          { status: 403 }
+          { error: ownership.error },
+          { status: ownership.status }
         );
       }
     }
 
-    if (!activeChatId) {
-      const firstUserMessage =
-        normalizedMessages.find((m) => m.role === "user")?.content || "New Chat";
+    const created = await createChatIfNeeded(
+      activeChatId,
+      ownerId,
+      normalizedMessages
+    );
 
-      const { data: newChat, error: chatError } = await supabaseAdmin
-        .from("chats")
-        .insert({
-          user_id: ownerId,
-          title: String(firstUserMessage).slice(0, 50)
-        })
-        .select()
-        .single();
+    if ("error" in created) {
+      return NextResponse.json(
+        { error: created.error },
+        { status: created.status }
+      );
+    }
 
-      if (chatError || !newChat) {
+    activeChatId = created.chatId;
+
+    const latestUserMessage = getLatestUserMessage(normalizedMessages);
+    const systemPrompt = systemPromptForMode(validatedMode as never);
+
+    await saveUserMessageIfNeeded(activeChatId, latestUserMessage);
+
+    if (validatedModel === "claude") {
+      if (!anthropicKey) {
         return NextResponse.json(
-          { error: chatError?.message || "Failed to create chat." },
+          { error: "Claude is not configured on the server." },
           { status: 500 }
         );
       }
 
-      activeChatId = newChat.id;
-    }
+      const anthropicMessages = toAnthropicMessages(normalizedMessages);
 
-    const latestUserMessage =
-      [...normalizedMessages].reverse().find((m) => m.role === "user")?.content || "";
+      const response = await anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2500,
+        temperature: 0.7,
+        system: systemPrompt,
+        messages: anthropicMessages
+      });
 
-    const systemPrompt = systemPromptForMode(mode as any);
+      const assistantReply =
+        response.content
+          .map((block) => {
+            if (block.type === "text") return block.text;
+            return "";
+          })
+          .join("")
+          .trim() || "No response.";
 
-    const encoder = new TextEncoder();
-    let assistantReply = "";
-    let streamClosed = false;
+      await saveAssistantMessage(activeChatId, assistantReply);
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          if (model === "claude") {
-            if (!anthropicKey) {
-              controller.enqueue(
-                encoder.encode("Claude is not configured on the server.")
-              );
-              controller.close();
-              streamClosed = true;
-              return;
-            }
-
-            const anthropicMessages = normalizedMessages
-              .filter(
-                (
-                  m
-                ): m is {
-                  role: "user" | "assistant";
-                  content: string;
-                } => m.role === "user" || m.role === "assistant"
-              )
-              .map((m) => ({
-                role: m.role,
-                content: m.content
-              }));
-
-            const anthropicStream = await anthropic.messages.create({
-              model: "claude-sonnet-4-6",
-              max_tokens: 2000,
-              temperature: 0.7,
-              system: systemPrompt,
-              messages: anthropicMessages as any,
-              stream: true
-            });
-
-            for await (const event of anthropicStream) {
-              if (event.type === "content_block_delta") {
-                const token =
-                  "text" in event.delta && typeof event.delta.text === "string"
-                    ? event.delta.text
-                    : "";
-
-                if (token && !streamClosed) {
-                  assistantReply += token;
-
-                  try {
-                    controller.enqueue(encoder.encode(token));
-                  } catch {
-                    streamClosed = true;
-                    break;
-                  }
-                }
-              }
-            }
-          } else {
-            const openaiStream = await openai.chat.completions.create({
-              model: "gpt-4o-mini",
-              temperature: 0.7,
-              stream: true,
-              messages: [
-                { role: "system", content: systemPrompt },
-                ...normalizedMessages
-              ]
-            });
-
-            for await (const chunk of openaiStream) {
-              const token = chunk.choices?.[0]?.delta?.content ?? "";
-
-              if (token && !streamClosed) {
-                assistantReply += token;
-
-                try {
-                  controller.enqueue(encoder.encode(token));
-                } catch {
-                  streamClosed = true;
-                  break;
-                }
-              }
-            }
-          }
-
-          if (latestUserMessage.trim() || assistantReply.trim()) {
-            await supabaseAdmin.from("messages").insert([
-              {
-                chat_id: activeChatId,
-                role: "user",
-                content: latestUserMessage
-              },
-              {
-                chat_id: activeChatId,
-                role: "assistant",
-                content: assistantReply
-              }
-            ]);
-          }
-
-          if (!streamClosed) {
-            controller.close();
-            streamClosed = true;
-          }
-        } catch (error) {
-          console.error("Streaming error:", error);
-
-          if (!streamClosed) {
-            controller.error(error);
-            streamClosed = true;
+      return NextResponse.json(
+        {
+          reply: assistantReply,
+          chatId: activeChatId
+        },
+        {
+          headers: {
+            "X-Chat-Id": String(activeChatId)
           }
         }
-      },
+      );
+    }
 
-      cancel() {
-        streamClosed = true;
-      }
+    const useLiveWeb = shouldUseLiveWebSearch(latestUserMessage);
+
+    const openaiResponse = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: buildOpenAIInput(normalizedMessages, systemPrompt),
+      tools: useLiveWeb ? [{ type: "web_search_preview" }] : []
     });
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "X-Chat-Id": String(activeChatId),
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive"
-      }
-    });
-  } catch (error) {
-    console.error("POST /api/chat error:", error);
+    const assistantReply = (openaiResponse.output_text || "No response.").trim();
+
+    await saveAssistantMessage(activeChatId, assistantReply);
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to process chat request."
+        reply: assistantReply,
+        chatId: activeChatId,
+        liveDataUsed: useLiveWeb
       },
-      { status: 500 }
+      {
+        headers: {
+          "X-Chat-Id": String(activeChatId)
+        }
+      }
+    );
+  } catch (error) {
+    console.error("POST /api/chat error:", error);
+
+    const friendly = getFriendlyApiError(
+      error,
+      "We could not process that message right now. Please try again."
+    );
+
+    return NextResponse.json(
+      { error: friendly.message },
+      { status: friendly.status }
     );
   }
 }

@@ -11,6 +11,11 @@ import {
 import ReactMarkdown from "react-markdown";
 import { getGuestId } from "@/lib/guest";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import {
+  loadCachedMessages,
+  removeCachedMessages,
+  saveCachedMessages
+} from "@/lib/chat-cache";
 
 declare global {
   interface Window {
@@ -22,6 +27,12 @@ declare global {
 type Msg = {
   role: string;
   content: string;
+};
+
+type ToastItem = {
+  id: string;
+  kind: "error" | "success";
+  message: string;
 };
 
 type ChatItem = {
@@ -263,6 +274,8 @@ export default function Home() {
   const [availableVoices, setAvailableVoices] = useState<VoiceOption[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [voiceStatus, setVoiceStatus] = useState("Wake phrase: Hey Nexa");
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [retryMessages, setRetryMessages] = useState<Msg[] | null>(null);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -284,6 +297,34 @@ export default function Home() {
   const userStoppedRef = useRef(false);
 
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
+
+  function getCacheKey(chatIdArg?: string | null) {
+    const ownerId = userId || guestId || "anonymous";
+    return chatIdArg ? `chat:${chatIdArg}` : `draft:${ownerId}`;
+  }
+
+  function showToast(message: string, kind: "error" | "success" = "error") {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setToasts((prev) => [...prev, { id, kind, message }]);
+
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 3500);
+  }
+
+  function getFriendlyClientError(message: string) {
+    const lower = message.toLowerCase();
+
+    if (lower.includes("failed to fetch") || lower.includes("network")) {
+      return "Network error. Your latest chat is kept locally. Retry when you're back online.";
+    }
+
+    if (lower.includes("daily") || lower.includes("limit")) {
+      return message;
+    }
+
+    return "Something went wrong. Your latest message is safe locally, and you can retry.";
+  }
 
   useEffect(() => {
     loadingRef.current = loading;
@@ -465,28 +506,41 @@ export default function Home() {
   }
 
   async function loadChat(chatId: string) {
-    const params = new URLSearchParams();
-    params.set("chatId", chatId);
+    try {
+      const params = new URLSearchParams();
+      params.set("chatId", chatId);
 
-    if (userId) params.set("userId", userId);
-    else if (guestId) params.set("guestId", guestId);
+      if (userId) params.set("userId", userId);
+      else if (guestId) params.set("guestId", guestId);
 
-    const res = await fetch(`/api/chat-messages?${params.toString()}`, {
-      cache: "no-store"
-    });
-    const data = await res.json();
+      const res = await fetch(`/api/chat-messages?${params.toString()}`, {
+        cache: "no-store"
+      });
+      const data = await res.json();
 
-    if (Array.isArray(data)) {
-      const loadedMessages = data.map((m: any) => ({
-        role: m.role,
-        content: m.content
-      }));
-      setMessages(loadedMessages);
-      messagesRef.current = loadedMessages;
-      setActiveChatId(chatId);
-      activeChatIdRef.current = chatId;
+      if (Array.isArray(data)) {
+        const loadedMessages = data.map((m: any) => ({
+          role: m.role,
+          content: m.content
+        }));
+        setMessages(loadedMessages);
+        messagesRef.current = loadedMessages;
+        setActiveChatId(chatId);
+        activeChatIdRef.current = chatId;
 
-      if (isMobile) setSidebarOpen(false);
+        if (isMobile) setSidebarOpen(false);
+      }
+    } catch {
+      const cachedMessages = loadCachedMessages(getCacheKey(chatId));
+      if (cachedMessages.length > 0) {
+        setMessages(cachedMessages);
+        messagesRef.current = cachedMessages;
+        setActiveChatId(chatId);
+        activeChatIdRef.current = chatId;
+        showToast("Loaded cached messages because the network request failed.");
+      } else {
+        showToast("Could not load this chat.");
+      }
     }
   }
 
@@ -652,6 +706,17 @@ export default function Home() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const cacheKey = getCacheKey(activeChatId);
+
+    if (messages.length === 0) {
+      removeCachedMessages(cacheKey);
+      return;
+    }
+
+    saveCachedMessages(cacheKey, messages);
+  }, [messages, activeChatId, userId, guestId]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -1213,6 +1278,8 @@ export default function Home() {
     if (loadingRef.current) return;
     if (!customMessages && !input.trim() && !selectedFile) return;
 
+    let pendingRetryMessages: Msg[] | null = null;
+
     setLoading(true);
     loadingRef.current = true;
     stopListening();
@@ -1250,6 +1317,15 @@ export default function Home() {
       const nextMessages = customMessages
         ? workingMessages
         : [...workingMessages, { role: "user", content: trimmedInput }];
+      pendingRetryMessages = nextMessages;
+
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        setRetryMessages(pendingRetryMessages);
+        showToast(
+          "You appear to be offline. Your latest messages were cached locally."
+        );
+        return;
+      }
 
       const resolvedRoute = resolveModel(trimmedInput);
 
@@ -1306,6 +1382,7 @@ export default function Home() {
         }
 
         await loadHistory();
+        setRetryMessages(null);
         return;
       }
 
@@ -1330,6 +1407,8 @@ export default function Home() {
         const updated = [...nextMessages, { role: "assistant", content: errorMessage }];
         setMessages(updated);
         messagesRef.current = updated;
+        setRetryMessages(pendingRetryMessages);
+        showToast(getFriendlyClientError(errorMessage));
         await loadHistory();
         return;
       }
@@ -1359,6 +1438,7 @@ export default function Home() {
         scheduleHandsFreeRestart(700);
       }
 
+      setRetryMessages(null);
       await loadHistory();
     } catch (error: any) {
       if (error?.name === "AbortError") {
@@ -1367,15 +1447,20 @@ export default function Home() {
         return;
       }
 
+      const friendlyMessage = getFriendlyClientError(
+        error instanceof Error ? error.message : "Request failed."
+      );
       const updated = [
         ...messagesRef.current,
         {
           role: "assistant",
-          content: error instanceof Error ? error.message : "Request failed."
+          content: friendlyMessage
         }
       ];
       setMessages(updated);
       messagesRef.current = updated;
+      setRetryMessages(pendingRetryMessages);
+      showToast(friendlyMessage);
       scheduleHandsFreeRestart(700);
     } finally {
       abortControllerRef.current = null;
@@ -1410,6 +1495,8 @@ export default function Home() {
       messagesRef.current = [];
     }
 
+    removeCachedMessages(getCacheKey(id));
+
     await loadHistory();
   }
 
@@ -1420,6 +1507,7 @@ export default function Home() {
     if (!confirmed) return;
 
     try {
+      const previousChatId = activeChatIdRef.current;
       const res = await fetch("/api/clear-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1438,6 +1526,7 @@ export default function Home() {
       setMessages([]);
       messagesRef.current = [];
       setHistory([]);
+      removeCachedMessages(getCacheKey(previousChatId));
       await loadHistory();
     } catch {
       alert("Failed to clear chats.");
@@ -1463,6 +1552,7 @@ export default function Home() {
   }
 
   function newChat() {
+    removeCachedMessages(getCacheKey(activeChatIdRef.current));
     setMessages([]);
     messagesRef.current = [];
     setActiveChatId(null);
@@ -1767,6 +1857,43 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      <div
+        style={{
+          position: "fixed",
+          top: 14,
+          right: 14,
+          zIndex: 120,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          pointerEvents: "none"
+        }}
+      >
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            style={{
+              pointerEvents: "auto",
+              minWidth: 240,
+              maxWidth: 320,
+              background: toast.kind === "error" ? "#3a1f1f" : "#183122",
+              color: "white",
+              border:
+                toast.kind === "error"
+                  ? "1px solid #7f1d1d"
+                  : "1px solid #166534",
+              borderRadius: 12,
+              padding: "10px 12px",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+              fontSize: 13,
+              lineHeight: 1.45
+            }}
+          >
+            {toast.message}
+          </div>
+        ))}
+      </div>
 
       {isMobile && mobileActionsOpen && (
         <div
@@ -2719,6 +2846,33 @@ export default function Home() {
               {selectedVoiceURI ? " • custom voice selected" : ""}
               {handsFreeWakeMode ? " • hands-free on" : " • hands-free off"}
             </div>
+
+            {retryMessages && (
+              <div
+                style={{
+                  marginBottom: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  background: "#2a1d1d",
+                  border: "1px solid #5f2b2b",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  color: "#fecaca",
+                  fontSize: 13
+                }}
+              >
+                <span>Last request failed. Your message is cached locally.</span>
+                <button
+                  type="button"
+                  style={smallButtonStyle}
+                  onClick={() => void sendMessage(retryMessages)}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
 
             {isMobile ? (
               <div
