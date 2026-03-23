@@ -1614,6 +1614,78 @@ export default function Home() {
     return [];
   }
 
+  async function extractPdfTextLocally(file: File): Promise<string> {
+    try {
+      const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = (pdfjsLib as any).getDocument({
+        data: arrayBuffer,
+        disableWorker: true,
+        useWorkerFetch: false,
+        isEvalSupported: false
+      });
+      const pdf = await loadingTask.promise;
+      const maxPages = Math.min(pdf.numPages, 5);
+      const segments: string[] = [];
+
+      for (let i = 1; i <= maxPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = (Array.isArray(textContent.items) ? textContent.items : [])
+          .map((item: any) => (typeof item?.str === "string" ? item.str : ""))
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (pageText) {
+          segments.push(pageText);
+        }
+      }
+
+      return segments.join("\n\n").trim();
+    } catch (error) {
+      console.error("Local PDF text extraction failed:", error);
+      return "";
+    }
+  }
+
+  async function buildLocalFileMessage(
+    file: File,
+    ocrImages: string[]
+  ): Promise<string> {
+    const fileType = file.type || "application/octet-stream";
+    const fileName = file.name.toLowerCase();
+    let fileUrl = "";
+    let extractedText = "";
+    let extractionStatus = "NO_TEXT_EXTRACTED";
+
+    if (fileType.startsWith("image/")) {
+      fileUrl = ocrImages[0] || (await fileToDataUrl(file));
+      extractionStatus = "IMAGE_READY";
+    } else if (
+      fileType === "application/pdf" ||
+      fileName.endsWith(".pdf")
+    ) {
+      extractedText = await extractPdfTextLocally(file);
+      extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
+    } else if (
+      fileType.startsWith("text/") ||
+      fileName.endsWith(".txt") ||
+      fileName.endsWith(".md") ||
+      fileName.endsWith(".csv") ||
+      fileName.endsWith(".json")
+    ) {
+      extractedText = (await file.text()).trim();
+      extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
+    }
+
+    return `FILETEXT::${encodeURIComponent(file.name)}::${encodeURIComponent(
+      fileUrl
+    )}::${encodeURIComponent(fileType)}::${encodeURIComponent(
+      extractedText.slice(0, 20000)
+    )}::${encodeURIComponent(extractionStatus)}`;
+  }
+
   async function uploadSelectedFiles(): Promise<{
     uploadedMessages: Msg[];
     returnedChatId: string | null;
@@ -1639,9 +1711,10 @@ export default function Home() {
         fileType.startsWith("image/") ||
         fileType === "application/pdf" ||
         fileName.endsWith(".pdf");
+      let ocrImages: string[] = [];
 
       if (shouldRunOcr) {
-        const ocrImages = await buildOcrImageDataUrls(selectedFile);
+        ocrImages = await buildOcrImageDataUrls(selectedFile);
         ocrImages.forEach((img, index) => {
           if (img && typeof img === "string") {
             formData.append(`ocrImageDataUrl_${index}`, img);
@@ -1657,7 +1730,21 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.error || "File upload failed.");
+        const localMessageContent = await buildLocalFileMessage(
+          selectedFile,
+          ocrImages
+        );
+
+        uploadedMessages.push({
+          role: "user",
+          content: localMessageContent
+        });
+
+        showToast(
+          "File added locally because server upload failed. You can still ask questions about it.",
+          "success"
+        );
+        continue;
       }
 
       uploadedMessages.push({

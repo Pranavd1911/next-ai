@@ -447,12 +447,16 @@ async function createChatIfNeeded(
 
   const firstUserMessage =
     normalizedMessages.find((m) => m.role === "user")?.content || "New Chat";
+  const parsedFirstFile = parseRawFileMessage(firstUserMessage);
+  const chatTitle = parsedFirstFile?.fileName
+    ? `File: ${parsedFirstFile.fileName}`.slice(0, 50)
+    : String(firstUserMessage).slice(0, 50);
 
   const { data: newChat, error: chatError } = await supabaseAdmin
     .from("chats")
     .insert({
       user_id: ownerId,
-      title: String(firstUserMessage).slice(0, 50)
+      title: chatTitle
     })
     .select()
     .single();
