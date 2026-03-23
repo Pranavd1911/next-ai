@@ -220,6 +220,9 @@ export async function resolveRequestOwnerId(
   if (userId) {
     const token = getBearerToken(req);
     if (!token) {
+      if (guestId) {
+        return guestId;
+      }
       throw new ApiValidationError("Authentication required.", 401);
     }
 
@@ -229,10 +232,16 @@ export async function resolveRequestOwnerId(
     } = await supabaseAdmin.auth.getUser(token);
 
     if (error || !user) {
+      if (guestId) {
+        return guestId;
+      }
       throw new ApiValidationError("Invalid session.", 401);
     }
 
     if (user.id !== userId) {
+      if (guestId) {
+        return guestId;
+      }
       throw new ApiValidationError("Authenticated user mismatch.", 403);
     }
 
