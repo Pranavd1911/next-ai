@@ -26,18 +26,26 @@ export async function upsertFileExtractionJob(params: {
   ownerId: string;
   fileHash: string;
   chatId?: string | null;
+  messageId?: string | null;
   mimeType: string;
   status: "queued" | "processing" | "completed" | "failed";
   errorMessage?: string;
+  storagePath?: string;
+  previewImageData?: string;
+  attempts?: number;
 }) {
   try {
     const payload = {
       owner_id: params.ownerId,
       file_hash: params.fileHash,
       chat_id: params.chatId || null,
+      message_id: params.messageId || null,
       mime_type: params.mimeType,
       status: params.status,
       error_message: params.errorMessage || "",
+      storage_path: params.storagePath || "",
+      preview_image_data: params.previewImageData || "",
+      attempts: params.attempts ?? 0,
       updated_at: new Date().toISOString()
     };
 

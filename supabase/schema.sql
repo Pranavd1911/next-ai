@@ -99,8 +99,12 @@ create table if not exists file_extraction_jobs (
   owner_id text not null,
   file_hash text not null,
   chat_id uuid references chats(id) on delete set null,
+  message_id uuid references messages(id) on delete set null,
   mime_type text not null default '',
   status text not null default 'queued',
+  storage_path text not null default '',
+  preview_image_data text not null default '',
+  attempts integer not null default 0,
   error_message text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

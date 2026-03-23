@@ -1178,6 +1178,23 @@ export default function Home() {
     };
   }, [userId, guestId]);
 
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    const hasProcessingFile = messages.some((message) => {
+      const parsed = parseFileMessage(message.content);
+      return parsed?.extractionStatus === "PROCESSING";
+    });
+
+    if (!hasProcessingFile) return;
+
+    const timer = window.setInterval(() => {
+      void loadChat(activeChatId);
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [messages, activeChatId]);
+
   const filteredHistory = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return history;
@@ -2560,6 +2577,7 @@ export default function Home() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
+            data-testid="toast"
             style={{
               pointerEvents: "auto",
               minWidth: 240,
@@ -2596,6 +2614,7 @@ export default function Home() {
       {sidebarOpen && (
         <div style={sidebarStyle}>
           <button
+            data-testid="new-chat-button"
             style={{
               ...primaryButtonStyle,
               width: "100%",
@@ -2610,7 +2629,11 @@ export default function Home() {
             + New Chat
           </button>
 
-          <button style={dangerButtonStyle} onClick={clearAllChats}>
+          <button
+            data-testid="clear-chats-button"
+            style={dangerButtonStyle}
+            onClick={clearAllChats}
+          >
             Clear All Chats
           </button>
 
@@ -2672,6 +2695,7 @@ export default function Home() {
             {filteredHistory.map((h) => (
               <div
                 key={h.id}
+                data-testid="history-item"
                 style={{
                   padding: 10,
                   marginBottom: 10,
@@ -2697,6 +2721,7 @@ export default function Home() {
                   }}
                 >
                   <div
+                    data-testid="history-open-button"
                     style={{
                       cursor: "pointer",
                       color: "#f5fbff",
@@ -2731,12 +2756,14 @@ export default function Home() {
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
+                    data-testid="history-rename-button"
                     style={smallButtonStyle}
                     onClick={() => renameChat(h.id, h.title)}
                   >
                     Rename
                   </button>
                   <button
+                    data-testid="history-delete-button"
                     style={smallButtonStyle}
                     onClick={() => deleteChat(h.id)}
                   >
@@ -3199,6 +3226,8 @@ export default function Home() {
                 return (
                   <div
                     key={i}
+                    data-testid="chat-message"
+                    data-message-role={isUser ? "user" : "assistant"}
                     style={{
                       display: "flex",
                       justifyContent: isUser ? "flex-end" : "flex-start",
@@ -3232,6 +3261,7 @@ export default function Home() {
                       {parsedFile ? (
                         <div>
                           <div
+                            data-testid="file-message-card"
                             style={{
                               border: "1px solid rgba(255,255,255,0.2)",
                               borderRadius: 12,
@@ -3261,6 +3291,9 @@ export default function Home() {
                               style={{
                                 fontSize: 12,
                                 color:
+                                  parsedFile.extractionStatus === "PROCESSING"
+                                    ? "#fcd34d"
+                                    :
                                   parsedFile.extractionStatus === "TEXT_EXTRACTED" ||
                                   parsedFile.extractionStatus === "OCR_TEXT_EXTRACTED"
                                     ? "#86efac"
@@ -3268,7 +3301,9 @@ export default function Home() {
                                 marginBottom: 10
                               }}
                             >
-                              {parsedFile.extractionStatus === "TEXT_EXTRACTED"
+                              {parsedFile.extractionStatus === "PROCESSING"
+                                ? "Extracting text in background..."
+                                : parsedFile.extractionStatus === "TEXT_EXTRACTED"
                                 ? "Embedded text extracted successfully"
                                 : parsedFile.extractionStatus === "OCR_TEXT_EXTRACTED"
                                   ? "OCR text extracted successfully"
@@ -3297,6 +3332,7 @@ export default function Home() {
 
                             {parsedFile.fileUrl ? (
                               <a
+                                data-testid="open-file-link"
                                 href={parsedFile.fileUrl}
                                 target="_blank"
                                 rel="noreferrer"
@@ -3668,6 +3704,7 @@ export default function Home() {
               </button>
               <button
                 type="button"
+                data-testid="share-chat-button"
                 style={smallButtonStyle}
                 onClick={shareCurrentChat}
               >
@@ -3768,6 +3805,7 @@ export default function Home() {
                     >
                       <input
                         ref={fileInputRef}
+                        data-testid="composer-file-input"
                         type="file"
                         multiple
                         onChange={(e) => {
@@ -3890,6 +3928,7 @@ export default function Home() {
                     </button>
 
                     <textarea
+                      data-testid="composer-input"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -3927,6 +3966,7 @@ export default function Home() {
                     {loading ? (
                       <button
                         type="button"
+                        data-testid="stop-button"
                         style={{
                           ...iconButtonStyle,
                           background: "#4b1d1d",
@@ -3945,6 +3985,7 @@ export default function Home() {
                     ) : (
                       <button
                         type="button"
+                        data-testid="send-button"
                         style={{
                           ...iconButtonStyle,
                           width: 48,
@@ -3993,6 +4034,7 @@ export default function Home() {
                     >
                       <input
                         ref={fileInputRef}
+                        data-testid="composer-file-input"
                         type="file"
                         multiple
                         onChange={(e) => {
@@ -4115,6 +4157,7 @@ export default function Home() {
                     </button>
 
                     <textarea
+                      data-testid="composer-input"
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
@@ -4149,6 +4192,7 @@ export default function Home() {
                     {loading ? (
                       <button
                         type="button"
+                        data-testid="stop-button"
                         style={{
                           ...iconButtonStyle,
                           background: "#4b1d1d",
@@ -4162,6 +4206,7 @@ export default function Home() {
                     ) : (
                       <button
                         type="button"
+                        data-testid="send-button"
                         style={iconButtonStyle}
                         onClick={() => void submitCurrentInput()}
                         title="Send"

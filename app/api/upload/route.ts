@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import {
   MAX_OCR_IMAGES,
@@ -7,7 +6,6 @@ import {
   validateFile
 } from "@/lib/api-guards";
 import { resolveRequestOwnerId, upsertFileExtractionJob } from "@/lib/server-data";
-import { extractPdfTextFromBuffer } from "@/lib/pdf-extraction";
 import {
   hasSufficientEmbeddedText,
   mergeExtractedTextSegments,
@@ -17,147 +15,16 @@ import {
   finishRequestTrace,
   startRequestTrace
 } from "@/lib/request-tracing";
+import {
+  extractEmbeddedTextFromBuffer,
+  getCachedExtraction,
+  saveCachedExtraction,
+  runVisionOcr,
+  supabaseAdmin
+} from "@/lib/file-extraction-server";
+import { buildFileMessageContent } from "@/lib/file-messages";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const openaiKey = process.env.OPENAI_API_KEY!;
-
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
-// ------------------------
-// Extract embedded text
-// ------------------------
-async function extractEmbeddedText(file: File, buffer: Buffer) {
-  const mimeType = file.type || "application/octet-stream";
-  const fileName = file.name.toLowerCase();
-
-  try {
-    if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
-      return await extractPdfTextFromBuffer(buffer, { maxPages: 5 });
-    }
-
-    if (
-      mimeType.startsWith("text/") ||
-      fileName.endsWith(".txt") ||
-      fileName.endsWith(".md") ||
-      fileName.endsWith(".csv") ||
-      fileName.endsWith(".json")
-    ) {
-      return buffer.toString("utf-8").trim();
-    }
-
-    return "";
-  } catch (error) {
-    console.error("Embedded text extraction failed:", error);
-    return "";
-  }
-}
-
-// ------------------------
-// OCR using OpenAI Vision
-// ------------------------
-async function runVisionOcr(imageDataUrl: string) {
-  if (!openaiKey) return "";
-
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${openaiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        temperature: 0,
-        messages: [
-          {
-            role: "system",
-            content:
-              "You extract text from document images. Return only the text. No explanation."
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Extract all readable text from this document."
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: imageDataUrl,
-                  detail: "low"
-                }
-              }
-            ]
-          }
-        ]
-      })
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      console.error("OCR API error:", data);
-      return "";
-    }
-
-    return (data?.choices?.[0]?.message?.content || "").trim();
-  } catch (error) {
-    console.error("Vision OCR failed:", error);
-    return "";
-  }
-}
-
-async function getCachedExtraction(ownerId: string, fileHash: string) {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("file_extractions")
-      .select("extracted_text, extraction_status")
-      .eq("owner_id", ownerId)
-      .eq("file_hash", fileHash)
-      .maybeSingle();
-
-    if (error || !data) return null;
-
-    return {
-      extractedText: typeof data.extracted_text === "string" ? data.extracted_text : "",
-      extractionStatus:
-        typeof data.extraction_status === "string"
-          ? data.extraction_status
-          : "NO_TEXT_EXTRACTED"
-    };
-  } catch (error) {
-    console.error("File extraction cache read failed:", error);
-    return null;
-  }
-}
-
-async function saveCachedExtraction(params: {
-  ownerId: string;
-  fileHash: string;
-  mimeType: string;
-  extractedText: string;
-  extractionStatus: string;
-}) {
-  try {
-    await supabaseAdmin.from("file_extractions").upsert(
-      {
-        owner_id: params.ownerId,
-        file_hash: params.fileHash,
-        mime_type: params.mimeType,
-        extracted_text: params.extractedText,
-        extraction_status: params.extractionStatus,
-        updated_at: new Date().toISOString()
-      },
-      {
-        onConflict: "owner_id,file_hash"
-      }
-    );
-  } catch (error) {
-    console.error("File extraction cache write failed:", error);
-  }
-}
+const workerSecret = process.env.INTERNAL_WORKER_SECRET || "";
 
 // ------------------------
 // MAIN ROUTE
@@ -256,14 +123,6 @@ export async function POST(req: Request) {
     currentMimeType = file.type || "application/octet-stream";
     const safeName = file.name.replace(/\s+/g, "_");
     const filePath = `${ownerId}/${Date.now()}-${safeName}`;
-    extractionJobId = await upsertFileExtractionJob({
-      ownerId,
-      fileHash,
-      chatId,
-      mimeType: currentMimeType,
-      status: "processing"
-    });
-
     let fileUrl = "";
     let storageUploadSucceeded = false;
 
@@ -297,16 +156,21 @@ export async function POST(req: Request) {
     const cachedExtraction = await getCachedExtraction(ownerId, fileHash);
     let extractedText = "";
     let extractionStatus = "NO_TEXT_EXTRACTED";
+    let shouldQueueDeepExtraction = false;
 
     if (cachedExtraction) {
       extractedText = cachedExtraction.extractedText;
       extractionStatus = cachedExtraction.extractionStatus;
     } else {
-      extractedText = await extractEmbeddedText(file, buffer);
+      extractedText = await extractEmbeddedTextFromBuffer({
+        fileName: file.name,
+        mimeType,
+        buffer
+      });
 
       if (hasSufficientEmbeddedText(extractedText)) {
         extractionStatus = "TEXT_EXTRACTED";
-      } else if (ocrImages.length > 0) {
+      } else if (ocrImages.length > 0 && !storageUploadSucceeded) {
         let combinedText = extractedText.trim();
 
         for (const img of ocrImages) {
@@ -324,24 +188,21 @@ export async function POST(req: Request) {
         extractionStatus = extractedText
           ? "OCR_TEXT_EXTRACTED"
           : "NO_TEXT_EXTRACTED";
+      } else if (ocrImages.length > 0 && storageUploadSucceeded) {
+        extractionStatus = "PROCESSING";
+        shouldQueueDeepExtraction = true;
       }
 
-      await saveCachedExtraction({
-        ownerId,
-        fileHash,
-        mimeType,
-        extractedText,
-        extractionStatus
-      });
+      if (!shouldQueueDeepExtraction) {
+        await saveCachedExtraction({
+          ownerId,
+          fileHash,
+          mimeType,
+          extractedText,
+          extractionStatus
+        });
+      }
     }
-
-    await upsertFileExtractionJob({
-      ownerId,
-      fileHash,
-      chatId,
-      mimeType,
-      status: "completed"
-    });
 
     extractedText = extractedText.slice(0, 20000);
 
@@ -351,25 +212,58 @@ export async function POST(req: Request) {
     // ------------------------
     // STORE MESSAGE
     // ------------------------
-    const messageContent = `FILETEXT::${encodeURIComponent(
-      file.name
-    )}::${encodeURIComponent(fileUrl)}::${encodeURIComponent(
-      mimeType
-    )}::${encodeURIComponent(extractedText)}::${encodeURIComponent(
+    const messageContent = buildFileMessageContent({
+      fileName: file.name,
+      fileUrl,
+      mimeType,
+      extractedText,
       extractionStatus
-    )}`;
+    });
 
-    const { error: insertError } = await supabaseAdmin.from("messages").insert({
+    const { data: insertedMessage, error: insertError } = await supabaseAdmin
+      .from("messages")
+      .insert({
       chat_id: chatId,
       role: "user",
       content: messageContent
-    });
+      })
+      .select("id")
+      .single();
 
     if (insertError) {
       return NextResponse.json(
         { error: insertError.message },
         { status: 500 }
       );
+    }
+
+    extractionJobId = await upsertFileExtractionJob({
+      ownerId,
+      fileHash,
+      chatId,
+      messageId: insertedMessage?.id || null,
+      mimeType: currentMimeType,
+      status: shouldQueueDeepExtraction ? "queued" : "completed",
+      storagePath: storageUploadSucceeded ? filePath : "",
+      previewImageData: ocrImages[0] || "",
+      attempts: 0
+    });
+
+    if (shouldQueueDeepExtraction) {
+      const workerUrl = new URL("/api/file-extraction-worker", req.url).toString();
+      const workerHeaders = new Headers();
+      if (workerSecret) {
+        workerHeaders.set("Authorization", `Bearer ${workerSecret}`);
+      }
+
+      queueMicrotask(() => {
+        void fetch(workerUrl, {
+          method: "POST",
+          headers: workerHeaders
+        }).catch((workerError) => {
+          console.error("Background extraction trigger failed:", workerError);
+        });
+      });
     }
 
     const response = NextResponse.json({
