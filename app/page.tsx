@@ -3694,161 +3694,212 @@ export default function Home() {
             ) : (
               <div
                 style={{
-                  display: "flex",
-                  gap: 12,
-                  alignItems: "center"
+                  background: "linear-gradient(180deg, rgba(11,22,38,0.94), rgba(7,15,26,0.98))",
+                  border: "1px solid rgba(126,164,206,0.14)",
+                  borderRadius: 22,
+                  padding: 10,
+                  boxShadow: "0 24px 48px rgba(2,8,16,0.26)"
                 }}
               >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    setSelectedFiles(files);
-                  }}
-                  style={{ display: "none" }}
-                />
+                <div ref={mobileActionsRef} style={{ position: "relative" }}>
+                  {mobileActionsOpen && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 60,
+                        left: 0,
+                        width: 240,
+                        background: "linear-gradient(180deg, rgba(11,22,38,0.98), rgba(8,17,31,0.98))",
+                        border: "1px solid rgba(126,164,206,0.14)",
+                        borderRadius: 18,
+                        padding: 10,
+                        boxShadow: "0 22px 44px rgba(0,0,0,0.34)",
+                        zIndex: 50,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8
+                      }}
+                    >
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []);
+                          setSelectedFiles(files);
+                          setMobileActionsOpen(false);
+                        }}
+                        style={{ display: "none" }}
+                      />
 
-                <button
-                  type="button"
-                  style={iconButtonStyle}
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Upload"
-                >
-                  <PaperclipIcon width={18} height={18} />
-                </button>
+                      <button
+                        type="button"
+                        style={mobileActionCardStyle}
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <PaperclipIcon width={18} height={18} />
+                        <span>Upload file</span>
+                      </button>
 
-                <button
-                  type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    background: isListening || isSpeakingRef.current ? "#7c3aed" : "#2b3445",
-                    border:
-                      isListening || isSpeakingRef.current
-                        ? "1px solid #8b5cf6"
-                        : "1px solid #3b465a"
-                  }}
-                  onClick={startMicOnce}
-                  title={isSpeakingRef.current ? "Interrupt and speak" : "Speak"}
-                >
-                  <MicIcon width={18} height={18} />
-                </button>
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: isListening || isSpeakingRef.current ? "#7c3aed" : "#2b3445",
+                          border:
+                            isListening || isSpeakingRef.current
+                              ? "1px solid #8b5cf6"
+                              : "1px solid #3b465a"
+                        }}
+                        onClick={startMicOnce}
+                      >
+                        <MicIcon width={18} height={18} />
+                        <span>{isSpeakingRef.current ? "Interrupt + Speak" : "Speak"}</span>
+                      </button>
 
-                <button
-                  type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
-                    border: voiceAssistantOn
-                      ? "1px solid #2f7f64"
-                      : "1px solid #3b465a"
-                  }}
-                  onClick={() => {
-                    if (voiceAssistantOn) stopSpeaking();
-                    setVoiceAssistantOn((prev) => !prev);
-                  }}
-                  title={voiceAssistantOn ? "Voice on" : "Voice off"}
-                >
-                  {voiceAssistantOn ? (
-                    <VolumeOnIcon width={18} height={18} />
-                  ) : (
-                    <VolumeOffIcon width={18} height={18} />
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: voiceAssistantOn ? "#1f4f3f" : "#2b3445",
+                          border: voiceAssistantOn
+                            ? "1px solid #2f7f64"
+                            : "1px solid #3b465a"
+                        }}
+                        onClick={() => {
+                          if (voiceAssistantOn) stopSpeaking();
+                          setVoiceAssistantOn((prev) => !prev);
+                          setMobileActionsOpen(false);
+                        }}
+                      >
+                        {voiceAssistantOn ? (
+                          <VolumeOnIcon width={18} height={18} />
+                        ) : (
+                          <VolumeOffIcon width={18} height={18} />
+                        )}
+                        <span>{voiceAssistantOn ? "Voice on" : "Voice off"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
+                          border: handsFreeWakeMode
+                            ? "1px solid #14b8a6"
+                            : "1px solid #3b465a"
+                        }}
+                        onClick={toggleHandsFree}
+                      >
+                        <SparklesIcon width={18} height={18} />
+                        <span>{handsFreeWakeMode ? "Hands-free on" : "Hands-free off"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          ...mobileActionCardStyle,
+                          background: fullVoiceMode ? "#16324f" : "#2b3445",
+                          border: fullVoiceMode ? "1px solid #46c2ff" : "1px solid #3b465a"
+                        }}
+                        onClick={toggleFullVoiceMode}
+                      >
+                        <WaveformIcon width={18} height={18} />
+                        <span>{fullVoiceMode ? "Voice chat on" : "Voice chat off"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={mobileActionCardStyle}
+                        onClick={openCamera}
+                      >
+                        <CameraIcon width={18} height={18} />
+                        <span>Open camera</span>
+                      </button>
+                    </div>
                   )}
-                </button>
 
-                <button
-                  type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    background: handsFreeWakeMode ? "#0f766e" : "#2b3445",
-                    border: handsFreeWakeMode
-                      ? "1px solid #14b8a6"
-                      : "1px solid #3b465a"
-                  }}
-                  onClick={toggleHandsFree}
-                  title="Hands-free wake mode"
-                >
-                  <WaveformIcon width={18} height={18} />
-                </button>
-
-                <button
-                  type="button"
-                  style={{
-                    ...iconButtonStyle,
-                    background: fullVoiceMode ? "#16324f" : "#2b3445",
-                    border: fullVoiceMode ? "1px solid #46c2ff" : "1px solid #3b465a"
-                  }}
-                  onClick={toggleFullVoiceMode}
-                  title="Voice chat mode"
-                >
-                  <SparklesIcon width={18} height={18} />
-                </button>
-
-                <button
-                  type="button"
-                  style={iconButtonStyle}
-                  onClick={openCamera}
-                  title="Camera"
-                >
-                  <CameraIcon width={18} height={18} />
-                </button>
-
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      void submitCurrentInput();
-                    }
-                  }}
-                  rows={1}
-                  style={{
-                    flex: 1,
-                    padding: 14,
-                    background: "rgba(11,22,38,0.9)",
-                    color: "white",
-                    border: "1px solid rgba(126,164,206,0.16)",
-                    borderRadius: 18,
-                    outline: "none",
-                    resize: "none",
-                    minHeight: 52,
-                    width: "100%",
-                    boxSizing: "border-box"
-                  }}
-                  placeholder={
-                    isListening
-                      ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
-                      : selectedFiles.length > 0
-                        ? "Ask about the files/photos, or press Send to upload only"
-                        : "Message Nexa AI"
-                  }
-                />
-
-                {loading ? (
-                  <button
-                    type="button"
+                  <div
                     style={{
-                      ...iconButtonStyle,
-                      background: "#4b1d1d",
-                      border: "1px solid #7a2d2d"
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "center"
                     }}
-                    onClick={stopGeneration}
-                    title="Stop"
                   >
-                    <StopIcon width={18} height={18} />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    style={iconButtonStyle}
-                    onClick={() => void submitCurrentInput()}
-                    title="Send"
-                  >
-                    <SendIcon width={18} height={18} />
-                  </button>
-                )}
+                    <button
+                      type="button"
+                      style={{
+                        ...iconButtonStyle,
+                        width: 48,
+                        minWidth: 48,
+                        height: 48,
+                        minHeight: 48,
+                        borderRadius: 14,
+                        background: mobileActionsOpen ? "#3b465a" : "#2b3445"
+                      }}
+                      onClick={() => setMobileActionsOpen((prev) => !prev)}
+                      title="More actions"
+                    >
+                      <PlusIcon width={18} height={18} />
+                    </button>
+
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          void submitCurrentInput();
+                        }
+                      }}
+                      rows={1}
+                      style={{
+                        flex: 1,
+                        padding: 14,
+                        background: "rgba(11,22,38,0.9)",
+                        color: "white",
+                        border: "1px solid rgba(126,164,206,0.16)",
+                        borderRadius: 18,
+                        outline: "none",
+                        resize: "none",
+                        minHeight: 52,
+                        width: "100%",
+                        boxSizing: "border-box"
+                      }}
+                      placeholder={
+                        isListening
+                          ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
+                          : selectedFiles.length > 0
+                            ? "Ask about the files/photos, or press Send to upload only"
+                            : "Message Nexa AI"
+                      }
+                    />
+
+                    {loading ? (
+                      <button
+                        type="button"
+                        style={{
+                          ...iconButtonStyle,
+                          background: "#4b1d1d",
+                          border: "1px solid #7a2d2d"
+                        }}
+                        onClick={stopGeneration}
+                        title="Stop"
+                      >
+                        <StopIcon width={18} height={18} />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={iconButtonStyle}
+                        onClick={() => void submitCurrentInput()}
+                        title="Send"
+                      >
+                        <SendIcon width={18} height={18} />
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
