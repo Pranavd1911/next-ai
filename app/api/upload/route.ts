@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import {
   MAX_OCR_IMAGES,
   getFriendlyApiError,
@@ -10,8 +11,8 @@ import { resolveRequestOwnerId } from "@/lib/server-data";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const openaiKey = process.env.OPENAI_API_KEY!;
-const OCR_EARLY_EXIT_TEXT_LENGTH = 1200;
-const EMBEDDED_TEXT_SUFFICIENT_LENGTH = 500;
+const OCR_EARLY_EXIT_TEXT_LENGTH = 700;
+const EMBEDDED_TEXT_SUFFICIENT_LENGTH = 120;
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -122,6 +123,47 @@ async function runVisionOcr(imageDataUrl: string) {
   }
 }
 
+async function getCachedExtraction(ownerId: string, fileHash: string) {
+  const { data, error } = await supabaseAdmin
+    .from("file_extractions")
+    .select("extracted_text, extraction_status")
+    .eq("owner_id", ownerId)
+    .eq("file_hash", fileHash)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  return {
+    extractedText: typeof data.extracted_text === "string" ? data.extracted_text : "",
+    extractionStatus:
+      typeof data.extraction_status === "string"
+        ? data.extraction_status
+        : "NO_TEXT_EXTRACTED"
+  };
+}
+
+async function saveCachedExtraction(params: {
+  ownerId: string;
+  fileHash: string;
+  mimeType: string;
+  extractedText: string;
+  extractionStatus: string;
+}) {
+  await supabaseAdmin.from("file_extractions").upsert(
+    {
+      owner_id: params.ownerId,
+      file_hash: params.fileHash,
+      mime_type: params.mimeType,
+      extracted_text: params.extractedText,
+      extraction_status: params.extractionStatus,
+      updated_at: new Date().toISOString()
+    },
+    {
+      onConflict: "owner_id,file_hash"
+    }
+  );
+}
+
 // ------------------------
 // MAIN ROUTE
 // ------------------------
@@ -206,6 +248,7 @@ export async function POST(req: Request) {
     // UPLOAD FILE
     // ------------------------
     const buffer = Buffer.from(await file.arrayBuffer());
+    const fileHash = createHash("sha256").update(buffer).digest("hex");
     const safeName = file.name.replace(/\s+/g, "_");
     const filePath = `${ownerId}/${Date.now()}-${safeName}`;
 
@@ -233,33 +276,47 @@ export async function POST(req: Request) {
     // ------------------------
     // TEXT EXTRACTION
     // ------------------------
-    let extractedText = await extractEmbeddedText(file, buffer);
-    let extractionStatus = "";
+    const cachedExtraction = await getCachedExtraction(ownerId, fileHash);
+    let extractedText = "";
+    let extractionStatus = "NO_TEXT_EXTRACTED";
 
-    if (extractedText.trim().length >= EMBEDDED_TEXT_SUFFICIENT_LENGTH) {
-      extractionStatus = "TEXT_EXTRACTED";
-    } else if (ocrImages.length > 0) {
-      let combinedText = extractedText.trim();
+    if (cachedExtraction) {
+      extractedText = cachedExtraction.extractedText;
+      extractionStatus = cachedExtraction.extractionStatus;
+    } else {
+      extractedText = await extractEmbeddedText(file, buffer);
 
-      for (const img of ocrImages) {
-        const pageText = await runVisionOcr(img);
-        if (pageText.trim()) {
-          combinedText = [combinedText, pageText.trim()]
-            .filter(Boolean)
-            .join("\n\n");
+      if (extractedText.trim().length >= EMBEDDED_TEXT_SUFFICIENT_LENGTH) {
+        extractionStatus = "TEXT_EXTRACTED";
+      } else if (ocrImages.length > 0) {
+        let combinedText = extractedText.trim();
+
+        for (const img of ocrImages) {
+          const pageText = await runVisionOcr(img);
+          if (pageText.trim()) {
+            combinedText = [combinedText, pageText.trim()]
+              .filter(Boolean)
+              .join("\n\n");
+          }
+
+          if (combinedText.length >= OCR_EARLY_EXIT_TEXT_LENGTH) {
+            break;
+          }
         }
 
-        if (combinedText.length >= OCR_EARLY_EXIT_TEXT_LENGTH) {
-          break;
-        }
+        extractedText = combinedText.trim();
+        extractionStatus = extractedText
+          ? "OCR_TEXT_EXTRACTED"
+          : "NO_TEXT_EXTRACTED";
       }
 
-      extractedText = combinedText.trim();
-      extractionStatus = extractedText
-        ? "OCR_TEXT_EXTRACTED"
-        : "NO_TEXT_EXTRACTED";
-    } else {
-      extractionStatus = "NO_TEXT_EXTRACTED";
+      await saveCachedExtraction({
+        ownerId,
+        fileHash,
+        mimeType,
+        extractedText,
+        extractionStatus
+      });
     }
 
     extractedText = extractedText.slice(0, 20000);

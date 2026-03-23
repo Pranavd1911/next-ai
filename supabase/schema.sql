@@ -71,6 +71,17 @@ create table if not exists rate_limit_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists file_extractions (
+  owner_id text not null,
+  file_hash text not null,
+  mime_type text not null default '',
+  extracted_text text not null default '',
+  extraction_status text not null default 'NO_TEXT_EXTRACTED',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (owner_id, file_hash)
+);
+
 create index if not exists messages_chat_id_created_at_idx
 on messages (chat_id, created_at);
 
@@ -85,6 +96,9 @@ on memory_items (owner_id, created_at desc);
 
 create index if not exists rate_limit_events_owner_route_created_at_idx
 on rate_limit_events (owner_id, route, created_at desc);
+
+create index if not exists file_extractions_owner_updated_at_idx
+on file_extractions (owner_id, updated_at desc);
 
 alter table chats enable row level security;
 alter table messages enable row level security;
