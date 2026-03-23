@@ -138,18 +138,6 @@ export async function POST(req: Request) {
       windowMs: 60_000
     });
 
-    await incrementImageUsage(ownerId);
-    const dailyUsage = await incrementDailyImageUsage(ownerId);
-
-    if (dailyUsage.count > DAILY_IMAGE_LIMIT) {
-      return NextResponse.json(
-        {
-          error: `Daily image limit reached. You can generate up to ${DAILY_IMAGE_LIMIT} images per day.`
-        },
-        { status: 403 }
-      );
-    }
-
     activeChatId = chatId as string | null;
 
     if (activeChatId) {
@@ -210,6 +198,18 @@ export async function POST(req: Request) {
       }
 
       activeChatId = newChat.id;
+    }
+
+    await incrementImageUsage(ownerId);
+    const dailyUsage = await incrementDailyImageUsage(ownerId);
+
+    if (dailyUsage.count > DAILY_IMAGE_LIMIT) {
+      return NextResponse.json(
+        {
+          error: `Daily image limit reached. You can generate up to ${DAILY_IMAGE_LIMIT} images per day.`
+        },
+        { status: 403 }
+      );
     }
 
     const prompt = buildImagePrompt(normalizedMessages);

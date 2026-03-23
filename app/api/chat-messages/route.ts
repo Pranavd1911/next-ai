@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { processQueuedExtractionJobs } from "@/lib/file-extraction-jobs";
 import { getFriendlyApiError } from "@/lib/api-guards";
 import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
 import {
@@ -54,6 +55,16 @@ export async function GET(req: Request) {
       return response;
     }
 
+    try {
+      await processQueuedExtractionJobs({
+        ownerId,
+        chatId,
+        limit: 1
+      });
+    } catch (processingError) {
+      console.error("Queued extraction processing failed during chat load:", processingError);
+    }
+
     const { data, error } = await supabaseAdmin
       .from("messages")
       .select("role, content, metadata, created_at")
@@ -81,6 +92,7 @@ export async function GET(req: Request) {
     await finishRequestTrace({ trace, status: 200, ownerId, chatId });
     return response;
   } catch (error) {
+    console.error("GET /api/chat-messages failed:", error);
     const friendly = getFriendlyApiError(error, "Failed to load messages.");
     const response = NextResponse.json(
       { error: friendly.message },

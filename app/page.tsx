@@ -343,6 +343,8 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRequestIdRef = useRef(0);
+  const canceledRequestIdsRef = useRef(new Set<number>());
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const restartTimerRef = useRef<number | null>(null);
@@ -1316,6 +1318,10 @@ export default function Home() {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    if (activeRequestIdRef.current) {
+      canceledRequestIdsRef.current.add(activeRequestIdRef.current);
+      activeRequestIdRef.current = 0;
+    }
     setLoading(false);
     loadingRef.current = false;
   }
@@ -1827,6 +1833,7 @@ export default function Home() {
     if (!customMessages && !input.trim() && selectedFiles.length === 0) return;
 
     let pendingRetryMessages: Msg[] | null = null;
+    let requestId = 0;
 
     setLoading(true);
     loadingRef.current = true;
@@ -1908,14 +1915,17 @@ export default function Home() {
 
       if (isMobile) setSidebarOpen(false);
 
-      const controller = new AbortController();
+      requestId = activeRequestIdRef.current + 1;
+      activeRequestIdRef.current = requestId;
+
+      const controller =
+        resolvedRoute === "image" ? null : new AbortController();
       abortControllerRef.current = controller;
 
       if (resolvedRoute === "image") {
         const imageRes = await apiFetch("/api/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
           body: JSON.stringify({
             messages: convertMessagesForApi(nextMessages),
             mode: "image",
@@ -1925,12 +1935,20 @@ export default function Home() {
           })
         });
 
+        if (canceledRequestIdsRef.current.has(requestId)) {
+          return;
+        }
+
         if (!imageRes.ok) {
           let errorMessage = "Image request failed.";
           try {
             const errorData = await imageRes.json();
             errorMessage = errorData?.error || errorMessage;
           } catch {}
+
+          if (canceledRequestIdsRef.current.has(requestId)) {
+            return;
+          }
 
           const updated = [
             ...nextMessages,
@@ -1943,6 +1961,11 @@ export default function Home() {
         }
 
         const imageData = await imageRes.json();
+
+        if (canceledRequestIdsRef.current.has(requestId)) {
+          return;
+        }
+
         const imageReply = imageData.url || imageData.error || "...";
         const newChatId = imageData.chatId || currentChatId || activeChatIdRef.current || null;
 
@@ -1970,7 +1993,7 @@ export default function Home() {
       const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
+        signal: controller?.signal,
         body: JSON.stringify({
           messages: convertMessagesForApi(nextMessages),
           rawMessages: nextMessages,
@@ -2062,6 +2085,10 @@ export default function Home() {
       scheduleHandsFreeRestart(700);
     } finally {
       abortControllerRef.current = null;
+      if (activeRequestIdRef.current === requestId) {
+        activeRequestIdRef.current = 0;
+      }
+      canceledRequestIdsRef.current.delete(requestId);
       setLoading(false);
       loadingRef.current = false;
     }

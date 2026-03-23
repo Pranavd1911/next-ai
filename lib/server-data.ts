@@ -1,10 +1,102 @@
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 import { ApiValidationError } from "./api-guards.ts";
+import { mergeRememberedMemory } from "./user-memory.ts";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const guestSessionSecret = process.env.GUEST_SESSION_SECRET || serviceRoleKey;
+const GUEST_SESSION_COOKIE = "nexa_guest_session";
+let supportsExtractionJobMessageIdColumn: boolean | null = null;
+let fileExtractionJobsSchemaSupported = true;
+let loggedExtractionJobsSchemaWarning = false;
 
 export const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+function isFileExtractionJobsSchemaMismatch(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof (error as { message?: unknown }).message === "string"
+          ? (error as { message: string }).message
+          : "";
+  const lower = message.toLowerCase();
+
+  return lower.includes("file_extraction_jobs") && (
+    lower.includes("schema cache") ||
+    lower.includes("column")
+  );
+}
+
+function warnExtractionJobsSchemaMismatch(error: unknown) {
+  if (loggedExtractionJobsSchemaWarning) return;
+  loggedExtractionJobsSchemaWarning = true;
+  console.warn(
+    "File extraction job tracking is disabled until the latest Supabase schema is applied:",
+    error
+  );
+}
+
+function normalizeLegacyGuestId(guestId?: string | null) {
+  if (typeof guestId !== "string") return null;
+  const normalized = guestId.trim();
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(normalized)) return null;
+  return normalized;
+}
+
+function signGuestSession(guestId: string) {
+  return createHmac("sha256", guestSessionSecret).update(guestId).digest("hex");
+}
+
+function encodeGuestSession(guestId: string) {
+  return `${guestId}.${signGuestSession(guestId)}`;
+}
+
+function decodeGuestSession(value?: string | null) {
+  if (!value || typeof value !== "string") return null;
+
+  const boundary = value.lastIndexOf(".");
+  if (boundary <= 0 || boundary === value.length - 1) return null;
+
+  const guestId = value.slice(0, boundary);
+  const signature = value.slice(boundary + 1);
+  const expected = signGuestSession(guestId);
+
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+
+  if (signatureBuffer.length !== expectedBuffer.length) return null;
+  if (!timingSafeEqual(signatureBuffer, expectedBuffer)) return null;
+
+  return guestId;
+}
+
+async function resolveGuestOwnerId(legacyGuestId?: string | null) {
+  const cookieStore = await cookies();
+  const existing = decodeGuestSession(cookieStore.get(GUEST_SESSION_COOKIE)?.value);
+
+  if (existing) {
+    return existing;
+  }
+
+  const guestId = normalizeLegacyGuestId(legacyGuestId) || randomUUID();
+
+  cookieStore.set(GUEST_SESSION_COOKIE, encodeGuestSession(guestId), {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365
+  });
+
+  return guestId;
+}
 
 export type UserPreferenceRecord = {
   owner_id: string;
@@ -34,12 +126,28 @@ export async function upsertFileExtractionJob(params: {
   previewImageData?: string;
   attempts?: number;
 }) {
+  if (!fileExtractionJobsSchemaSupported) {
+    return null;
+  }
+
   try {
     const payload = {
       owner_id: params.ownerId,
       file_hash: params.fileHash,
       chat_id: params.chatId || null,
       message_id: params.messageId || null,
+      mime_type: params.mimeType,
+      status: params.status,
+      error_message: params.errorMessage || "",
+      storage_path: params.storagePath || "",
+      preview_image_data: params.previewImageData || "",
+      attempts: params.attempts ?? 0,
+      updated_at: new Date().toISOString()
+    };
+    const fallbackPayload = {
+      owner_id: params.ownerId,
+      file_hash: params.fileHash,
+      chat_id: params.chatId || null,
       mime_type: params.mimeType,
       status: params.status,
       error_message: params.errorMessage || "",
@@ -64,14 +172,41 @@ export async function upsertFileExtractionJob(params: {
       return existing.id;
     }
 
-    const { data } = await supabaseAdmin
+    let insertBuilder = supabaseAdmin
       .from("file_extraction_jobs")
-      .insert(payload)
+      .insert(supportsExtractionJobMessageIdColumn === false ? fallbackPayload : payload)
       .select("id")
       .single();
 
+    let { data, error } = await insertBuilder;
+
+    if (
+      error &&
+      error.message.toLowerCase().includes("message_id")
+    ) {
+      supportsExtractionJobMessageIdColumn = false;
+      const fallbackInsert = await supabaseAdmin
+        .from("file_extraction_jobs")
+        .insert(fallbackPayload)
+        .select("id")
+        .single();
+      data = fallbackInsert.data;
+      error = fallbackInsert.error;
+    } else if (!error && supportsExtractionJobMessageIdColumn === null) {
+      supportsExtractionJobMessageIdColumn = true;
+    }
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
     return data?.id || null;
   } catch (error) {
+    if (isFileExtractionJobsSchemaMismatch(error)) {
+      fileExtractionJobsSchemaSupported = false;
+      warnExtractionJobsSchemaMismatch(error);
+      return null;
+    }
     console.error("File extraction job tracking failed:", error);
     return null;
   }
@@ -218,6 +353,31 @@ function getBearerToken(req: Request) {
   return header.slice(7).trim() || null;
 }
 
+export async function requireAuthenticatedUserId(
+  req: Request,
+  expectedUserId?: string | null
+) {
+  const token = getBearerToken(req);
+  if (!token) {
+    throw new ApiValidationError("Authentication required.", 401);
+  }
+
+  const {
+    data: { user },
+    error
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (error || !user) {
+    throw new ApiValidationError("Invalid session.", 401);
+  }
+
+  if (expectedUserId && user.id !== expectedUserId) {
+    throw new ApiValidationError("Authenticated user mismatch.", 403);
+  }
+
+  return user.id;
+}
+
 export async function resolveRequestOwnerId(
   req: Request,
   params: { userId?: string | null; guestId?: string | null }
@@ -226,39 +386,8 @@ export async function resolveRequestOwnerId(
   const guestId = params.guestId || null;
 
   if (userId) {
-    const token = getBearerToken(req);
-    if (!token) {
-      if (guestId) {
-        return guestId;
-      }
-      throw new ApiValidationError("Authentication required.", 401);
-    }
-
-    const {
-      data: { user },
-      error
-    } = await supabaseAdmin.auth.getUser(token);
-
-    if (error || !user) {
-      if (guestId) {
-        return guestId;
-      }
-      throw new ApiValidationError("Invalid session.", 401);
-    }
-
-    if (user.id !== userId) {
-      if (guestId) {
-        return guestId;
-      }
-      throw new ApiValidationError("Authenticated user mismatch.", 403);
-    }
-
-    return user.id;
+    return requireAuthenticatedUserId(req, userId);
   }
 
-  if (guestId) {
-    return guestId;
-  }
-
-  throw new ApiValidationError("Missing userId or guestId.", 400);
+  return resolveGuestOwnerId(guestId);
 }

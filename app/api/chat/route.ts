@@ -605,18 +605,6 @@ export async function POST(req: Request) {
       windowSeconds: 60
     });
 
-    await incrementChatUsage(ownerId);
-    const dailyUsage = await incrementDailyChatUsage(ownerId);
-
-    if (dailyUsage.count > DAILY_CHAT_LIMIT) {
-      return NextResponse.json(
-        {
-          error: `Free plan limit reached. You can send up to ${DAILY_CHAT_LIMIT} messages per day.`
-        },
-        { status: 403 }
-      );
-    }
-
     let activeChatId = chatId as string | null;
     traceChatId = activeChatId;
 
@@ -628,6 +616,25 @@ export async function POST(req: Request) {
           { status: ownership.status }
         );
       }
+    }
+
+    if (validatedModel === "claude" && !anthropicKey) {
+      return NextResponse.json(
+        { error: "Claude is not configured on the server." },
+        { status: 500 }
+      );
+    }
+
+    await incrementChatUsage(ownerId);
+    const dailyUsage = await incrementDailyChatUsage(ownerId);
+
+    if (dailyUsage.count > DAILY_CHAT_LIMIT) {
+      return NextResponse.json(
+        {
+          error: `Free plan limit reached. You can send up to ${DAILY_CHAT_LIMIT} messages per day.`
+        },
+        { status: 403 }
+      );
     }
 
     const created = await createChatIfNeeded(
@@ -701,13 +708,6 @@ export async function POST(req: Request) {
       });
 
     if (validatedModel === "claude") {
-      if (!anthropicKey) {
-        return NextResponse.json(
-          { error: "Claude is not configured on the server." },
-          { status: 500 }
-        );
-      }
-
       const anthropicMessages = toAnthropicMessages(normalizedMessages);
 
       const response = await anthropic.messages.create({

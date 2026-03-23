@@ -5,6 +5,7 @@ import {
   normalizeMessages,
   validateFile
 } from "../lib/api-guards.ts";
+import { mergeRememberedMemory } from "../lib/user-memory.ts";
 
 test("normalizeMessages trims and keeps valid chat roles", () => {
   const normalized = normalizeMessages([
@@ -29,4 +30,16 @@ test("validateFile accepts supported pdf uploads", () => {
   });
 
   assert.doesNotThrow(() => validateFile(file));
+});
+
+test("mergeRememberedMemory deduplicates and normalizes remembered lines", () => {
+  const merged = mergeRememberedMemory(
+    "I am a PM student\nI prefer direct answers",
+    "  I prefer   direct answers  \nMy goal is to ship fast"
+  );
+
+  assert.equal(
+    merged,
+    "I am a PM student\nI prefer direct answers\nMy goal is to ship fast"
+  );
 });

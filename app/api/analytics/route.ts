@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getFriendlyApiError } from "@/lib/api-guards";
-import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
+import {
+  requireAuthenticatedUserId,
+  supabaseAdmin
+} from "@/lib/server-data";
 import {
   finishRequestTrace,
   startRequestTrace
@@ -11,10 +14,18 @@ export async function GET(req: Request) {
   let ownerId: string | null = null;
 
   try {
-    ownerId = await resolveRequestOwnerId(req, {
-      userId: new URL(req.url).searchParams.get("userId"),
-      guestId: null
-    });
+    const requestedUserId = new URL(req.url).searchParams.get("userId");
+    if (!requestedUserId) {
+      const response = NextResponse.json(
+        { error: "Authentication required." },
+        { status: 401 }
+      );
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 401 });
+      return response;
+    }
+
+    ownerId = await requireAuthenticatedUserId(req, requestedUserId);
     const today = new Date().toISOString().slice(0, 10);
     const sevenDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
       .toISOString()

@@ -23,7 +23,10 @@ Create `.env.local` from `.env.example` and fill these:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_publishable_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 OPENAI_API_KEY=your_openai_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key_optional
+GUEST_SESSION_SECRET=replace_with_a_long_random_secret
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
@@ -57,6 +60,8 @@ Import the GitHub repo into Vercel and add the same environment variables there.
 Important:
 - set `NEXT_PUBLIC_APP_URL` to your production Vercel URL
 - add that same URL to Supabase Auth URL Configuration
+- set a strong `GUEST_SESSION_SECRET` in production so guest ownership cannot be forged
+- do not deploy without `SUPABASE_SERVICE_ROLE_KEY`
 
 ## Notes
 

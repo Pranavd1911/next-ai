@@ -110,6 +110,16 @@ create table if not exists file_extraction_jobs (
   updated_at timestamptz not null default now()
 );
 
+alter table if exists file_extraction_jobs
+  add column if not exists message_id uuid references messages(id) on delete set null,
+  add column if not exists mime_type text not null default '',
+  add column if not exists status text not null default 'queued',
+  add column if not exists storage_path text not null default '',
+  add column if not exists preview_image_data text not null default '',
+  add column if not exists attempts integer not null default 0,
+  add column if not exists error_message text not null default '',
+  add column if not exists updated_at timestamptz not null default now();
+
 create index if not exists messages_chat_id_created_at_idx
 on messages (chat_id, created_at);
 

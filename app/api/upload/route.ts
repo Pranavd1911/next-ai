@@ -24,8 +24,6 @@ import {
 } from "@/lib/file-extraction-server";
 import { buildFileMessageContent } from "@/lib/file-messages";
 
-const workerSecret = process.env.INTERNAL_WORKER_SECRET || "";
-
 // ------------------------
 // MAIN ROUTE
 // ------------------------
@@ -248,23 +246,6 @@ export async function POST(req: Request) {
       previewImageData: ocrImages[0] || "",
       attempts: 0
     });
-
-    if (shouldQueueDeepExtraction) {
-      const workerUrl = new URL("/api/file-extraction-worker", req.url).toString();
-      const workerHeaders = new Headers();
-      if (workerSecret) {
-        workerHeaders.set("Authorization", `Bearer ${workerSecret}`);
-      }
-
-      queueMicrotask(() => {
-        void fetch(workerUrl, {
-          method: "POST",
-          headers: workerHeaders
-        }).catch((workerError) => {
-          console.error("Background extraction trigger failed:", workerError);
-        });
-      });
-    }
 
     const response = NextResponse.json({
       success: true,
