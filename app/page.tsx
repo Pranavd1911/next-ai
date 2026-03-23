@@ -1653,37 +1653,44 @@ export default function Home() {
     file: File,
     ocrImages: string[]
   ): Promise<string> {
-    const fileType = file.type || "application/octet-stream";
-    const fileName = file.name.toLowerCase();
-    let fileUrl = "";
-    let extractedText = "";
-    let extractionStatus = "NO_TEXT_EXTRACTED";
+    try {
+      const fileType = file.type || "application/octet-stream";
+      const fileName = file.name.toLowerCase();
+      let fileUrl = "";
+      let extractedText = "";
+      let extractionStatus = "NO_TEXT_EXTRACTED";
 
-    if (fileType.startsWith("image/")) {
-      fileUrl = ocrImages[0] || (await fileToDataUrl(file));
-      extractionStatus = "IMAGE_READY";
-    } else if (
-      fileType === "application/pdf" ||
-      fileName.endsWith(".pdf")
-    ) {
-      extractedText = await extractPdfTextLocally(file);
-      extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
-    } else if (
-      fileType.startsWith("text/") ||
-      fileName.endsWith(".txt") ||
-      fileName.endsWith(".md") ||
-      fileName.endsWith(".csv") ||
-      fileName.endsWith(".json")
-    ) {
-      extractedText = (await file.text()).trim();
-      extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
+      if (fileType.startsWith("image/")) {
+        fileUrl = ocrImages[0] || (await fileToDataUrl(file));
+        extractionStatus = "IMAGE_READY";
+      } else if (
+        fileType === "application/pdf" ||
+        fileName.endsWith(".pdf")
+      ) {
+        extractedText = await extractPdfTextLocally(file);
+        extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
+      } else if (
+        fileType.startsWith("text/") ||
+        fileName.endsWith(".txt") ||
+        fileName.endsWith(".md") ||
+        fileName.endsWith(".csv") ||
+        fileName.endsWith(".json")
+      ) {
+        extractedText = (await file.text()).trim();
+        extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
+      }
+
+      return `FILETEXT::${encodeURIComponent(file.name)}::${encodeURIComponent(
+        fileUrl
+      )}::${encodeURIComponent(fileType)}::${encodeURIComponent(
+        extractedText.slice(0, 20000)
+      )}::${encodeURIComponent(extractionStatus)}`;
+    } catch (error) {
+      console.error("Local file fallback failed:", error);
+      return `FILETEXT::${encodeURIComponent(file.name)}::::${encodeURIComponent(
+        file.type || "application/octet-stream"
+      )}::::${encodeURIComponent("NO_TEXT_EXTRACTED")}`;
     }
-
-    return `FILETEXT::${encodeURIComponent(file.name)}::${encodeURIComponent(
-      fileUrl
-    )}::${encodeURIComponent(fileType)}::${encodeURIComponent(
-      extractedText.slice(0, 20000)
-    )}::${encodeURIComponent(extractionStatus)}`;
   }
 
   async function uploadSelectedFiles(): Promise<{
@@ -1722,14 +1729,30 @@ export default function Home() {
         });
       }
 
-      const res = await apiFetch("/api/upload", {
-        method: "POST",
-        body: formData
-      });
+      try {
+        const res = await apiFetch("/api/upload", {
+          method: "POST",
+          body: formData
+        });
 
-      const data = await res.json();
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {}
 
-      if (!res.ok) {
+        if (!res.ok) {
+          throw new Error(data?.error || "File upload failed.");
+        }
+
+        uploadedMessages.push({
+          role: "user",
+          content: data.messageContent
+        });
+
+        currentChatId = data.chatId || currentChatId;
+      } catch (error) {
+        console.error("Server file upload failed, using local fallback:", error);
+
         const localMessageContent = await buildLocalFileMessage(
           selectedFile,
           ocrImages
@@ -1744,15 +1767,7 @@ export default function Home() {
           "File added locally because server upload failed. You can still ask questions about it.",
           "success"
         );
-        continue;
       }
-
-      uploadedMessages.push({
-        role: "user",
-        content: data.messageContent
-      });
-
-      currentChatId = data.chatId || currentChatId;
     }
 
     setSelectedFiles([]);
