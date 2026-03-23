@@ -1668,7 +1668,14 @@ export default function Home() {
         fileName.endsWith(".pdf")
       ) {
         extractedText = await extractPdfTextLocally(file);
-        extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
+        if (extractedText) {
+          extractionStatus = "TEXT_EXTRACTED";
+        } else if (ocrImages[0]) {
+          fileUrl = ocrImages[0];
+          extractionStatus = "OCR_IMAGE_READY";
+        } else {
+          extractionStatus = "NO_TEXT_EXTRACTED";
+        }
       } else if (
         fileType.startsWith("text/") ||
         fileName.endsWith(".txt") ||
@@ -1682,7 +1689,9 @@ export default function Home() {
 
       return `FILETEXT::${encodeURIComponent(file.name)}::${encodeURIComponent(
         fileUrl
-      )}::${encodeURIComponent(fileType)}::${encodeURIComponent(
+      )}::${encodeURIComponent(
+        extractionStatus === "OCR_IMAGE_READY" ? "image/jpeg" : fileType
+      )}::${encodeURIComponent(
         extractedText.slice(0, 20000)
       )}::${encodeURIComponent(extractionStatus)}`;
     } catch (error) {
@@ -3249,6 +3258,8 @@ export default function Home() {
                                 ? "Embedded text extracted successfully"
                                 : parsedFile.extractionStatus === "OCR_TEXT_EXTRACTED"
                                   ? "OCR text extracted successfully"
+                                  : parsedFile.extractionStatus === "OCR_IMAGE_READY"
+                                    ? "Document preview captured locally"
                                   : "No extractable text found"}
                             </div>
 

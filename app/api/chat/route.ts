@@ -270,9 +270,18 @@ function detectAgentProfile(params: {
 
   if (
     hasUploadedImage &&
-    ["image", "photo", "picture", "solve", "question", "diagram", "explain this"].some(
-      (keyword) => text.includes(keyword)
-    )
+    [
+      "image",
+      "photo",
+      "picture",
+      "solve",
+      "question",
+      "diagram",
+      "explain this",
+      "what is this",
+      "what's this",
+      "identify"
+    ].some((keyword) => text.includes(keyword))
   ) {
     return "vision";
   }
