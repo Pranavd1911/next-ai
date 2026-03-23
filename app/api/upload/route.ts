@@ -110,22 +110,27 @@ async function runVisionOcr(imageDataUrl: string) {
 }
 
 async function getCachedExtraction(ownerId: string, fileHash: string) {
-  const { data, error } = await supabaseAdmin
-    .from("file_extractions")
-    .select("extracted_text, extraction_status")
-    .eq("owner_id", ownerId)
-    .eq("file_hash", fileHash)
-    .maybeSingle();
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("file_extractions")
+      .select("extracted_text, extraction_status")
+      .eq("owner_id", ownerId)
+      .eq("file_hash", fileHash)
+      .maybeSingle();
 
-  if (error || !data) return null;
+    if (error || !data) return null;
 
-  return {
-    extractedText: typeof data.extracted_text === "string" ? data.extracted_text : "",
-    extractionStatus:
-      typeof data.extraction_status === "string"
-        ? data.extraction_status
-        : "NO_TEXT_EXTRACTED"
-  };
+    return {
+      extractedText: typeof data.extracted_text === "string" ? data.extracted_text : "",
+      extractionStatus:
+        typeof data.extraction_status === "string"
+          ? data.extraction_status
+          : "NO_TEXT_EXTRACTED"
+    };
+  } catch (error) {
+    console.error("File extraction cache read failed:", error);
+    return null;
+  }
 }
 
 async function saveCachedExtraction(params: {
@@ -135,19 +140,23 @@ async function saveCachedExtraction(params: {
   extractedText: string;
   extractionStatus: string;
 }) {
-  await supabaseAdmin.from("file_extractions").upsert(
-    {
-      owner_id: params.ownerId,
-      file_hash: params.fileHash,
-      mime_type: params.mimeType,
-      extracted_text: params.extractedText,
-      extraction_status: params.extractionStatus,
-      updated_at: new Date().toISOString()
-    },
-    {
-      onConflict: "owner_id,file_hash"
-    }
-  );
+  try {
+    await supabaseAdmin.from("file_extractions").upsert(
+      {
+        owner_id: params.ownerId,
+        file_hash: params.fileHash,
+        mime_type: params.mimeType,
+        extracted_text: params.extractedText,
+        extraction_status: params.extractionStatus,
+        updated_at: new Date().toISOString()
+      },
+      {
+        onConflict: "owner_id,file_hash"
+      }
+    );
+  } catch (error) {
+    console.error("File extraction cache write failed:", error);
+  }
 }
 
 // ------------------------
@@ -255,25 +264,31 @@ export async function POST(req: Request) {
       status: "processing"
     });
 
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from("uploads")
-      .upload(filePath, buffer, {
-        contentType: file.type || "application/octet-stream",
-        upsert: false
-      });
+    let fileUrl = "";
+    let storageUploadSucceeded = false;
 
-    if (uploadError) {
-      return NextResponse.json(
-        { error: uploadError.message },
-        { status: 500 }
-      );
+    try {
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from("uploads")
+        .upload(filePath, buffer, {
+          contentType: file.type || "application/octet-stream",
+          upsert: false
+        });
+
+      if (uploadError) {
+        console.error("File storage upload failed:", uploadError);
+      } else {
+        const { data: publicUrlData } = supabaseAdmin.storage
+          .from("uploads")
+          .getPublicUrl(filePath);
+
+        fileUrl = publicUrlData.publicUrl || "";
+        storageUploadSucceeded = fileUrl.length > 0;
+      }
+    } catch (error) {
+      console.error("File storage pipeline failed:", error);
     }
 
-    const { data: publicUrlData } = supabaseAdmin.storage
-      .from("uploads")
-      .getPublicUrl(filePath);
-
-    const fileUrl = publicUrlData.publicUrl;
     const mimeType = currentMimeType || file.type || "application/octet-stream";
 
     // ------------------------
@@ -378,6 +393,7 @@ export async function POST(req: Request) {
         mimeType,
         extractionStatus,
         cachedExtraction: !!cachedExtraction,
+        storageUploadSucceeded,
         extractionJobId
       }
     });

@@ -3168,23 +3168,25 @@ export default function Home() {
                               </div>
                             )}
 
-                            <a
-                              href={parsedFile.fileUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{
-                                color: "white",
-                                textDecoration: "none",
-                                background: "#1e293b",
-                                border: "1px solid #334155",
-                                borderRadius: 8,
-                                padding: "8px 10px",
-                                display: "inline-block",
-                                marginTop: 10
-                              }}
-                            >
-                              Open file
-                            </a>
+                            {parsedFile.fileUrl ? (
+                              <a
+                                href={parsedFile.fileUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  color: "white",
+                                  textDecoration: "none",
+                                  background: "#1e293b",
+                                  border: "1px solid #334155",
+                                  borderRadius: 8,
+                                  padding: "8px 10px",
+                                  display: "inline-block",
+                                  marginTop: 10
+                                }}
+                              >
+                                Open file
+                              </a>
+                            ) : null}
                           </div>
                         </div>
                       ) : isImage ? (
