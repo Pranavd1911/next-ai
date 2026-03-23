@@ -405,6 +405,39 @@ export default function Home() {
     return "Something went wrong. Your latest message is safe locally, and you can retry.";
   }
 
+  function appendAssistantErrorMessage(message: string) {
+    const currentMessages = [...messagesRef.current];
+    const lastMessage = currentMessages[currentMessages.length - 1];
+
+    if (
+      lastMessage?.role === "assistant" &&
+      typeof lastMessage.content === "string" &&
+      lastMessage.content.trim() === message
+    ) {
+      return;
+    }
+
+    if (
+      lastMessage?.role === "assistant" &&
+      typeof lastMessage.content === "string" &&
+      lastMessage.content.trim().length === 0
+    ) {
+      currentMessages.pop();
+    }
+
+    const updated = [
+      ...currentMessages,
+      {
+        role: "assistant",
+        content: message,
+        metadata: { sources: [] }
+      }
+    ];
+
+    setMessages(updated);
+    messagesRef.current = updated;
+  }
+
   function getAgentLabel(agentProfile?: string) {
     switch (agentProfile) {
       case "coding":
@@ -1626,6 +1659,8 @@ export default function Home() {
         }
 
         if (!input.trim()) {
+          setRetryMessages(null);
+          setVoiceStatus("File uploaded");
           await loadHistory();
           return;
         }
@@ -1755,9 +1790,7 @@ export default function Home() {
 
       if (!res.ok) {
         const errorMessage = data?.error || "Request failed.";
-        const updated = [...nextMessages, { role: "assistant", content: errorMessage }];
-        setMessages(updated);
-        messagesRef.current = updated;
+        appendAssistantErrorMessage(errorMessage);
         setRetryMessages(pendingRetryMessages);
         showToast(getFriendlyClientError(errorMessage));
         await loadHistory();
@@ -1815,16 +1848,7 @@ export default function Home() {
       const friendlyMessage = getFriendlyClientError(
         error instanceof Error ? error.message : "Request failed."
       );
-      const updated = [
-        ...messagesRef.current,
-        {
-          role: "assistant",
-          content: friendlyMessage,
-          metadata: { sources: [] }
-        }
-      ];
-      setMessages(updated);
-      messagesRef.current = updated;
+      appendAssistantErrorMessage(friendlyMessage);
       setRetryMessages(pendingRetryMessages);
       showToast(friendlyMessage);
       scheduleHandsFreeRestart(700);
@@ -3321,20 +3345,21 @@ export default function Home() {
                 }}
               >
                 <span style={{ flex: 1, color: "#dbeafe" }}>{selectedFileLabel}</span>
-                {selectedFiles.slice(0, 3).map((file) => (
-                  <span
-                    key={file.name + file.size}
-                    style={{
-                      background: "#1f2937",
-                      border: "1px solid #334155",
-                      borderRadius: 999,
-                      padding: "4px 8px",
-                      fontSize: 12
-                    }}
-                  >
-                    {file.name}
-                  </span>
-                ))}
+                {selectedFiles.length > 1 &&
+                  selectedFiles.slice(0, 3).map((file) => (
+                    <span
+                      key={file.name + file.size}
+                      style={{
+                        background: "#1f2937",
+                        border: "1px solid #334155",
+                        borderRadius: 999,
+                        padding: "4px 8px",
+                        fontSize: 12
+                      }}
+                    >
+                      {file.name}
+                    </span>
+                  ))}
 
                 <button
                   onClick={() => {
