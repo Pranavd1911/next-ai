@@ -17,6 +17,12 @@ import {
   saveCachedMessages
 } from "@/lib/chat-cache";
 import { acquireSingleFlight, releaseSingleFlight } from "@/lib/single-flight";
+import {
+  buildFileMessageContent,
+  compactFileMessageForApi,
+  parseFileMessage,
+  type ParsedFileMessage
+} from "@/lib/file-messages";
 
 declare global {
   interface Window {
@@ -54,14 +60,6 @@ type ChatItem = {
 type Segment =
   | { type: "markdown"; content: string }
   | { type: "code"; content: string };
-
-type ParsedFileMessage = {
-  fileName: string;
-  fileUrl: string;
-  mimeType: string;
-  extractedText: string;
-  extractionStatus: string;
-};
 
 type SelectedModel = "auto" | "openai" | "claude";
 type ResolvedRoute = "openai" | "claude" | "image";
@@ -397,6 +395,27 @@ export default function Home() {
       ...init,
       headers
     });
+  }
+
+  async function reportClientError(params: {
+    source: string;
+    message: string;
+    stack?: string;
+  }) {
+    try {
+      await apiFetch("/api/client-errors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          guestId,
+          source: params.source,
+          message: params.message,
+          stack: params.stack || "",
+          href: typeof window !== "undefined" ? window.location.href : ""
+        })
+      });
+    } catch {}
   }
 
   function getFriendlyClientError(message: string) {
@@ -1127,26 +1146,43 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    function handleWindowError(event: ErrorEvent) {
+      void reportClientError({
+        source: "window.error",
+        message: event.message || "Unknown client error",
+        stack: event.error instanceof Error ? event.error.stack : ""
+      });
+    }
+
+    function handleUnhandledRejection(event: PromiseRejectionEvent) {
+      const reason = event.reason;
+      void reportClientError({
+        source: "window.unhandledrejection",
+        message:
+          reason instanceof Error
+            ? reason.message
+            : typeof reason === "string"
+              ? reason
+              : "Unhandled rejection",
+        stack: reason instanceof Error ? reason.stack : ""
+      });
+    }
+
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, [userId, guestId]);
+
   const filteredHistory = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return history;
     return history.filter((h) => (h.title || "").toLowerCase().includes(q));
   }, [history, search]);
-
-  function parseFileMessage(content: string): ParsedFileMessage | null {
-    if (!content.startsWith("FILETEXT::")) return null;
-
-    const parts = content.split("::");
-    if (parts.length < 6) return null;
-
-    return {
-      fileName: decodeURIComponent(parts[1] || ""),
-      fileUrl: decodeURIComponent(parts[2] || ""),
-      mimeType: decodeURIComponent(parts[3] || ""),
-      extractedText: decodeURIComponent(parts[4] || ""),
-      extractionStatus: decodeURIComponent(parts[5] || "")
-    };
-  }
 
   function isGeneratedImageMessage(message: Msg) {
     if (message.role !== "assistant") return false;
@@ -1172,37 +1208,9 @@ export default function Home() {
 
       if (!parsed) return m;
 
-      if (parsed.extractedText && parsed.extractedText.trim().length > 0) {
-        const shorterText =
-          parsed.extractedText.length > 15000
-            ? parsed.extractedText.slice(0, 15000)
-            : parsed.extractedText;
-
-        return {
-          role: m.role,
-          content: [
-            "The user uploaded a file.",
-            `File name: ${parsed.fileName}`,
-            `File type: ${parsed.mimeType}`,
-            "Use the extracted file content below to answer the user's next question.",
-            "",
-            "BEGIN FILE CONTENT",
-            shorterText,
-            "END FILE CONTENT"
-          ].join("\n")
-        };
-      }
-
       return {
         role: m.role,
-        content: [
-          "The user uploaded a file.",
-          `File name: ${parsed.fileName}`,
-          `File type: ${parsed.mimeType}`,
-          parsed.fileUrl.startsWith("data:image/")
-            ? "A local document preview image is attached for visual analysis."
-            : `File URL: ${parsed.fileUrl || "[unavailable]"}`
-        ].join("\n")
+        content: compactFileMessageForApi(parsed)
       };
     });
   }
@@ -1689,18 +1697,22 @@ export default function Home() {
         extractionStatus = extractedText ? "TEXT_EXTRACTED" : "NO_TEXT_EXTRACTED";
       }
 
-      return `FILETEXT::${encodeURIComponent(file.name)}::${encodeURIComponent(
-        fileUrl
-      )}::${encodeURIComponent(
-        extractionStatus === "OCR_IMAGE_READY" ? "image/jpeg" : fileType
-      )}::${encodeURIComponent(
-        extractedText.slice(0, 20000)
-      )}::${encodeURIComponent(extractionStatus)}`;
+      return buildFileMessageContent({
+        fileName: file.name,
+        fileUrl,
+        mimeType: extractionStatus === "OCR_IMAGE_READY" ? "image/jpeg" : fileType,
+        extractedText: extractedText.slice(0, 20000),
+        extractionStatus
+      });
     } catch (error) {
       console.error("Local file fallback failed:", error);
-      return `FILETEXT::${encodeURIComponent(file.name)}::::${encodeURIComponent(
-        file.type || "application/octet-stream"
-      )}::::${encodeURIComponent("NO_TEXT_EXTRACTED")}`;
+      return buildFileMessageContent({
+        fileName: file.name,
+        fileUrl: "",
+        mimeType: file.type || "application/octet-stream",
+        extractedText: "",
+        extractionStatus: "NO_TEXT_EXTRACTED"
+      });
     }
   }
 

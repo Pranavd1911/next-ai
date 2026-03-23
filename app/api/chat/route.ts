@@ -23,6 +23,10 @@ import {
   finishRequestTrace,
   startRequestTrace
 } from "@/lib/request-tracing";
+import {
+  deriveChatTitleFromMessage,
+  parseFileMessage as parseSharedFileMessage
+} from "@/lib/file-messages";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -201,18 +205,7 @@ function buildOpenAIInput(messages: ChatMessage[], systemPrompt: string) {
 }
 
 function parseRawFileMessage(content: string): RawFileMessage | null {
-  if (!content.startsWith("FILETEXT::")) return null;
-
-  const parts = content.split("::");
-  if (parts.length < 6) return null;
-
-  return {
-    fileName: decodeURIComponent(parts[1] || ""),
-    fileUrl: decodeURIComponent(parts[2] || ""),
-    mimeType: decodeURIComponent(parts[3] || ""),
-    extractedText: decodeURIComponent(parts[4] || ""),
-    extractionStatus: decodeURIComponent(parts[5] || "")
-  };
+  return parseSharedFileMessage(content);
 }
 
 function detectAgentProfile(params: {
@@ -456,10 +449,7 @@ async function createChatIfNeeded(
 
   const firstUserMessage =
     normalizedMessages.find((m) => m.role === "user")?.content || "New Chat";
-  const parsedFirstFile = parseRawFileMessage(firstUserMessage);
-  const chatTitle = parsedFirstFile?.fileName
-    ? `File: ${parsedFirstFile.fileName}`.slice(0, 50)
-    : String(firstUserMessage).slice(0, 50);
+  const chatTitle = deriveChatTitleFromMessage(firstUserMessage);
 
   const { data: newChat, error: chatError } = await supabaseAdmin
     .from("chats")

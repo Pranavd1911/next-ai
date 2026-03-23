@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { getFriendlyApiError } from "@/lib/api-guards";
 import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
+import {
+  finishRequestTrace,
+  startRequestTrace
+} from "@/lib/request-tracing";
 
 export async function GET(req: Request) {
+  const trace = startRequestTrace("api/analytics");
+  let ownerId: string | null = null;
+
   try {
-    const ownerId = await resolveRequestOwnerId(req, {
+    ownerId = await resolveRequestOwnerId(req, {
       userId: new URL(req.url).searchParams.get("userId"),
       guestId: null
     });
@@ -75,14 +82,30 @@ export async function GET(req: Request) {
       messages: bucket.messages
     }));
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       dailyUsers: uniqueUsers,
       messagesPerUser,
       dropOffPoints,
       dailySeries
     });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({ trace, status: 200, ownerId });
+    return response;
   } catch (error) {
     const friendly = getFriendlyApiError(error, "Failed to load analytics.");
-    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
+    const response = NextResponse.json(
+      { error: friendly.message },
+      { status: friendly.status }
+    );
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: friendly.status,
+      ownerId,
+      metadata: {
+        error: error instanceof Error ? error.message : "Unknown analytics error"
+      }
+    });
+    return response;
   }
 }
