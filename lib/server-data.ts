@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { ApiValidationError } from "@/lib/api-guards";
+import { ApiValidationError } from "./api-guards.ts";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;

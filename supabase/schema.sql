@@ -57,6 +57,18 @@ create table if not exists analytics_events (
   created_at timestamptz not null default now()
 );
 
+create table if not exists observability_events (
+  id uuid primary key default gen_random_uuid(),
+  owner_id text,
+  chat_id uuid references chats(id) on delete set null,
+  severity text not null default 'info',
+  source text not null default 'server',
+  message text not null default '',
+  request_id text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists memory_items (
   id uuid primary key default gen_random_uuid(),
   owner_id text not null,
@@ -102,6 +114,12 @@ on analytics_events (created_at);
 
 create index if not exists analytics_events_owner_id_idx
 on analytics_events (owner_id);
+
+create index if not exists observability_events_created_at_idx
+on observability_events (created_at desc);
+
+create index if not exists observability_events_severity_created_at_idx
+on observability_events (severity, created_at desc);
 
 create index if not exists memory_items_owner_id_idx
 on memory_items (owner_id, created_at desc);

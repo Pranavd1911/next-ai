@@ -8,6 +8,10 @@ import {
   requireOwnerId
 } from "@/lib/api-guards";
 import { resolveRequestOwnerId } from "@/lib/server-data";
+import {
+  finishRequestTrace,
+  startRequestTrace
+} from "@/lib/request-tracing";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -101,12 +105,19 @@ function buildImagePrompt(messages: ChatMessage[]) {
 }
 
 export async function POST(req: Request) {
+  const trace = startRequestTrace("api/image");
+  let ownerId: string | null = null;
+  let activeChatId: string | null = null;
+
   try {
     if (!supabaseUrl || !serviceRoleKey || !openaiKey) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Missing required environment variables." },
         { status: 500 }
       );
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 500, ownerId, chatId: activeChatId });
+      return response;
     }
 
     const body = await req.json();
@@ -118,7 +129,7 @@ export async function POST(req: Request) {
       chatId = null
     } = body;
 
-    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
+    ownerId = await resolveRequestOwnerId(req, { userId, guestId });
     const normalizedMessages = normalizeMessages(messages) as ChatMessage[];
 
     enforceMemoryRateLimit({
@@ -139,7 +150,7 @@ export async function POST(req: Request) {
       );
     }
 
-    let activeChatId = chatId as string | null;
+    activeChatId = chatId as string | null;
 
     if (activeChatId) {
       const { data: existingChat, error: existingChatError } = await supabaseAdmin
@@ -149,17 +160,23 @@ export async function POST(req: Request) {
         .single();
 
       if (existingChatError || !existingChat) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           { error: "Chat not found." },
           { status: 404 }
         );
+        response.headers.set("X-Request-Id", trace.requestId);
+        await finishRequestTrace({ trace, status: 404, ownerId, chatId: activeChatId });
+        return response;
       }
 
       if (existingChat.user_id !== ownerId) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           { error: "Unauthorized chat access." },
           { status: 403 }
         );
+        response.headers.set("X-Request-Id", trace.requestId);
+        await finishRequestTrace({ trace, status: 403, ownerId, chatId: activeChatId });
+        return response;
       }
     }
 
@@ -177,10 +194,19 @@ export async function POST(req: Request) {
         .single();
 
       if (chatError || !newChat) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           { error: chatError?.message || "Failed to create chat." },
           { status: 500 }
         );
+        response.headers.set("X-Request-Id", trace.requestId);
+        await finishRequestTrace({
+          trace,
+          status: 500,
+          ownerId,
+          chatId: activeChatId,
+          metadata: { error: chatError?.message || "Failed to create chat." }
+        });
+        return response;
       }
 
       activeChatId = newChat.id;
@@ -209,10 +235,13 @@ export async function POST(req: Request) {
     }
 
     if (!finalImageUrl) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: "Image generation failed." },
         { status: 500 }
       );
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 500, ownerId, chatId: activeChatId });
+      return response;
     }
 
     const { error: insertError } = await supabaseAdmin.from("messages").insert([
@@ -229,16 +258,28 @@ export async function POST(req: Request) {
     ]);
 
     if (insertError) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { error: insertError.message || "Failed to save image chat." },
         { status: 500 }
       );
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({
+        trace,
+        status: 500,
+        ownerId,
+        chatId: activeChatId,
+        metadata: { error: insertError.message || "Failed to save image chat." }
+      });
+      return response;
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       url: finalImageUrl,
       chatId: activeChatId
     });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({ trace, status: 200, ownerId, chatId: activeChatId });
+    return response;
   } catch (error) {
     console.error("POST /api/image error:", error);
 
@@ -247,9 +288,20 @@ export async function POST(req: Request) {
       "Image generation is unavailable right now. Please try again."
     );
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: friendly.message },
       { status: friendly.status }
     );
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: friendly.status,
+      ownerId,
+      chatId: activeChatId,
+      metadata: {
+        error: error instanceof Error ? error.message : "Unknown image error"
+      }
+    });
+    return response;
   }
 }

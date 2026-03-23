@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  classifyTraceSeverity,
+  recordOperationalEvent
+} from "./observability.ts";
 
 export type RequestTrace = {
   route: string;
@@ -37,9 +41,10 @@ export async function finishRequestTrace(params: {
     durationMs,
     ...params.metadata
   };
+  const severity = classifyTraceSeverity(params.status, durationMs);
 
   if (params.status >= 500 || durationMs >= 1500) {
-    const { trackAnalyticsEvent } = await import("@/lib/server-data");
+    const { trackAnalyticsEvent } = await import("./server-data.ts");
     await trackAnalyticsEvent({
       ownerId: params.ownerId || null,
       chatId: params.chatId || null,
@@ -47,6 +52,22 @@ export async function finishRequestTrace(params: {
       metadata: {
         ...baseMetadata,
         status: params.status
+      }
+    });
+  }
+
+  if (severity !== "info") {
+    await recordOperationalEvent({
+      severity,
+      source: params.trace.route,
+      message: `Request completed with status ${params.status} in ${durationMs}ms`,
+      ownerId: params.ownerId || null,
+      chatId: params.chatId || null,
+      requestId: params.trace.requestId,
+      metadata: {
+        status: params.status,
+        durationMs,
+        ...params.metadata
       }
     });
   }

@@ -5,6 +5,7 @@ import {
   resolveRequestOwnerId,
   trackAnalyticsEvent
 } from "@/lib/server-data";
+import { recordOperationalEvent } from "@/lib/observability";
 import {
   finishRequestTrace,
   startRequestTrace
@@ -37,6 +38,17 @@ export async function POST(req: Request) {
         stack: typeof body?.stack === "string" ? body.stack.slice(0, 3000) : "",
         href: typeof body?.href === "string" ? body.href : "",
         requestId: typeof body?.requestId === "string" ? body.requestId : ""
+      }
+    });
+    await recordOperationalEvent({
+      severity: "error",
+      source: typeof body?.source === "string" ? body.source : "ui",
+      message: typeof body?.message === "string" ? body.message : "Client error",
+      ownerId,
+      requestId: typeof body?.requestId === "string" ? body.requestId : trace.requestId,
+      metadata: {
+        stack: typeof body?.stack === "string" ? body.stack.slice(0, 3000) : "",
+        href: typeof body?.href === "string" ? body.href : ""
       }
     });
 
