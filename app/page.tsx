@@ -1205,6 +1205,16 @@ export default function Home() {
     });
   }
 
+  function sanitizeMessagesForSend(sourceMessages: Msg[]) {
+    return sourceMessages.filter(
+      (message) =>
+        typeof message?.role === "string" &&
+        typeof message?.content === "string" &&
+        message.role.trim().length > 0 &&
+        message.content.trim().length > 0
+    );
+  }
+
   function detectIntent(text: string): ResolvedRoute {
     const inputText = text.toLowerCase().trim();
 
@@ -1682,14 +1692,20 @@ export default function Home() {
     setMobileActionsOpen(false);
 
     try {
-      let workingMessages = customMessages ? [...customMessages] : [...messagesRef.current];
+      let workingMessages = sanitizeMessagesForSend(
+        customMessages ? [...customMessages] : [...messagesRef.current]
+      );
       let currentChatId = activeChatIdRef.current;
 
       if (!customMessages && selectedFiles.length > 0) {
+        setRetryMessages(null);
         const uploadResult = await uploadSelectedFiles();
 
         if (uploadResult.uploadedMessages.length > 0) {
-          workingMessages = [...workingMessages, ...uploadResult.uploadedMessages];
+          workingMessages = sanitizeMessagesForSend([
+            ...workingMessages,
+            ...uploadResult.uploadedMessages
+          ]);
           setMessages(workingMessages);
           messagesRef.current = workingMessages;
         }
@@ -1712,9 +1728,17 @@ export default function Home() {
         ? customMessages[customMessages.length - 1]?.content?.trim() || ""
         : input.trim();
 
-      const nextMessages = customMessages
-        ? workingMessages
-        : [...workingMessages, { role: "user", content: trimmedInput }];
+      const nextMessages = sanitizeMessagesForSend(
+        customMessages
+          ? workingMessages
+          : [...workingMessages, { role: "user", content: trimmedInput }]
+      );
+
+      if (nextMessages.length === 0) {
+        setRetryMessages(null);
+        return;
+      }
+
       pendingRetryMessages = nextMessages;
 
       if (typeof navigator !== "undefined" && !navigator.onLine) {
