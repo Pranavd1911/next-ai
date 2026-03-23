@@ -23,17 +23,28 @@ async function extractEmbeddedText(file: File, buffer: Buffer) {
   try {
     if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
       const pdfParseModule = await import("pdf-parse");
-      const pdfParse =
-        (pdfParseModule as any).default ||
-        (pdfParseModule as any).pdfParse ||
-        pdfParseModule;
+      const PDFParse = (pdfParseModule as { PDFParse?: unknown }).PDFParse;
+      const PDFParseCtor = PDFParse as
+        | (new (options: { data: Buffer }) => {
+            getText: (params?: { first?: number }) => Promise<{ text?: string }>;
+            destroy: () => Promise<void>;
+          })
+        | undefined;
 
-      if (typeof pdfParse !== "function") {
-        throw new Error("pdf-parse did not export a callable parser.");
+      if (typeof PDFParseCtor !== "function") {
+        throw new Error("pdf-parse did not export the PDFParse class.");
       }
 
-      const result = await pdfParse(buffer);
-      return (result?.text || "").trim();
+      const parser = new PDFParseCtor({ data: buffer });
+
+      try {
+        const result = await parser.getText({
+          first: 5
+        });
+        return (result?.text || "").trim();
+      } finally {
+        await parser.destroy();
+      }
     }
 
     if (
