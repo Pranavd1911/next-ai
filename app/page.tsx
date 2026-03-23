@@ -1199,7 +1199,9 @@ export default function Home() {
           "The user uploaded a file.",
           `File name: ${parsed.fileName}`,
           `File type: ${parsed.mimeType}`,
-          `File URL: ${parsed.fileUrl}`
+          parsed.fileUrl.startsWith("data:image/")
+            ? "A local document preview image is attached for visual analysis."
+            : `File URL: ${parsed.fileUrl || "[unavailable]"}`
         ].join("\n")
       };
     });
