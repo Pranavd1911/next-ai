@@ -16,6 +16,7 @@ import {
   removeCachedMessages,
   saveCachedMessages
 } from "@/lib/chat-cache";
+import { acquireSingleFlight, releaseSingleFlight } from "@/lib/single-flight";
 
 declare global {
   interface Window {
@@ -80,8 +81,10 @@ type VoiceLanguage =
   | "kn-IN"
   | "ja-JP";
 
-const PDF_OCR_RENDER_SCALE = 1.15;
+const PDF_OCR_RENDER_SCALE = 0.8;
 const PDF_OCR_MAX_PAGES = 1;
+const PDF_OCR_MAX_WIDTH = 900;
+const PDF_OCR_JPEG_QUALITY = 0.45;
 
 function IconBase(props: SVGProps<SVGSVGElement>) {
   return (
@@ -356,6 +359,8 @@ export default function Home() {
   const isSpeakingRef = useRef(false);
   const manualMicModeRef = useRef(false);
   const userStoppedRef = useRef(false);
+  const actionInFlightRef = useRef(new Set<string>());
+  const historyInFlightRef = useRef(new Set<string>());
 
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
 
@@ -818,23 +823,39 @@ export default function Home() {
 
   async function loadHistory(currentUserIdArg?: string | null) {
     const actualUserId = currentUserIdArg ?? userId;
+    const historyKey = `history:${actualUserId || guestId || "anonymous"}`;
+
+    if (!acquireSingleFlight(historyInFlightRef.current, historyKey)) {
+      return;
+    }
+
     const params = new URLSearchParams();
 
     if (actualUserId) params.set("userId", actualUserId);
     else if (guestId) params.set("guestId", guestId);
     else {
       setHistory([]);
+      releaseSingleFlight(historyInFlightRef.current, historyKey);
       return;
     }
 
-    const res = await apiFetch(`/api/history?${params.toString()}`, {
-      cache: "no-store"
-    });
-    const data = await res.json();
-    setHistory(Array.isArray(data) ? data : []);
+    try {
+      const res = await apiFetch(`/api/history?${params.toString()}`, {
+        cache: "no-store"
+      });
+      const data = await res.json();
+      setHistory(Array.isArray(data) ? data : []);
+    } finally {
+      releaseSingleFlight(historyInFlightRef.current, historyKey);
+    }
   }
 
   async function loadChat(chatId: string) {
+    const actionKey = `load-chat:${chatId}`;
+    if (!acquireSingleFlight(actionInFlightRef.current, actionKey)) {
+      return;
+    }
+
     try {
       const params = new URLSearchParams();
       params.set("chatId", chatId);
@@ -871,6 +892,8 @@ export default function Home() {
       } else {
         showToast("Could not load this chat.");
       }
+    } finally {
+      releaseSingleFlight(actionInFlightRef.current, actionKey);
     }
   }
 
@@ -1261,9 +1284,17 @@ export default function Home() {
   }
 
   async function submitCurrentInput() {
-    if (loadingRef.current) return;
-    if (!input.trim() && selectedFiles.length === 0) return;
-    await sendMessage();
+    if (!acquireSingleFlight(actionInFlightRef.current, "submit-chat")) {
+      return;
+    }
+
+    try {
+      if (loadingRef.current) return;
+      if (!input.trim() && selectedFiles.length === 0) return;
+      await sendMessage();
+    } finally {
+      releaseSingleFlight(actionInFlightRef.current, "submit-chat");
+    }
   }
 
   function startMicOnce() {
@@ -1538,21 +1569,29 @@ export default function Home() {
         for (let i = 1; i <= maxPages; i++) {
           const page = await pdf.getPage(i);
           const viewport = page.getViewport({ scale: PDF_OCR_RENDER_SCALE });
+          const widthRatio =
+            viewport.width > PDF_OCR_MAX_WIDTH
+              ? PDF_OCR_MAX_WIDTH / viewport.width
+              : 1;
+          const finalViewport =
+            widthRatio < 1
+              ? page.getViewport({ scale: PDF_OCR_RENDER_SCALE * widthRatio })
+              : viewport;
 
           const canvas = document.createElement("canvas");
           const context = canvas.getContext("2d");
 
           if (!context) continue;
 
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+          canvas.width = Math.max(1, Math.round(finalViewport.width));
+          canvas.height = Math.max(1, Math.round(finalViewport.height));
 
           await page.render({
             canvasContext: context,
-            viewport
+            viewport: finalViewport
           }).promise;
 
-          images.push(canvas.toDataURL("image/jpeg", 0.72));
+          images.push(canvas.toDataURL("image/jpeg", PDF_OCR_JPEG_QUALITY));
         }
 
         return images;
@@ -1873,31 +1912,47 @@ export default function Home() {
   }
 
   async function deleteChat(id: string) {
+    const actionKey = `delete-chat:${id}`;
+    if (!acquireSingleFlight(actionInFlightRef.current, actionKey)) {
+      return;
+    }
+
     const params = new URLSearchParams();
     params.set("id", id);
 
     if (userId) params.set("userId", userId);
     else if (guestId) params.set("guestId", guestId);
 
-    await apiFetch(`/api/delete?${params.toString()}`, { method: "DELETE" });
+    try {
+      await apiFetch(`/api/delete?${params.toString()}`, { method: "DELETE" });
 
-    if (activeChatIdRef.current === id) {
-      setActiveChatId(null);
-      activeChatIdRef.current = null;
-      setMessages([]);
-      messagesRef.current = [];
+      if (activeChatIdRef.current === id) {
+        setActiveChatId(null);
+        activeChatIdRef.current = null;
+        setMessages([]);
+        messagesRef.current = [];
+      }
+
+      removeCachedMessages(getCacheKey(id));
+
+      await loadHistory();
+    } finally {
+      releaseSingleFlight(actionInFlightRef.current, actionKey);
     }
-
-    removeCachedMessages(getCacheKey(id));
-
-    await loadHistory();
   }
 
   async function clearAllChats() {
+    if (!acquireSingleFlight(actionInFlightRef.current, "clear-all-chats")) {
+      return;
+    }
+
     const confirmed = window.confirm(
       "Are you sure you want to delete all chats? This cannot be undone."
     );
-    if (!confirmed) return;
+    if (!confirmed) {
+      releaseSingleFlight(actionInFlightRef.current, "clear-all-chats");
+      return;
+    }
 
     try {
       const previousChatId = activeChatIdRef.current;
@@ -1923,25 +1978,39 @@ export default function Home() {
       await loadHistory();
     } catch {
       alert("Failed to clear chats.");
+    } finally {
+      releaseSingleFlight(actionInFlightRef.current, "clear-all-chats");
     }
   }
 
   async function renameChat(id: string, currentTitle: string) {
+    const actionKey = `rename-chat:${id}`;
+    if (!acquireSingleFlight(actionInFlightRef.current, actionKey)) {
+      return;
+    }
+
     const newTitle = window.prompt("Rename chat", currentTitle || "New Chat");
-    if (!newTitle?.trim()) return;
+    if (!newTitle?.trim()) {
+      releaseSingleFlight(actionInFlightRef.current, actionKey);
+      return;
+    }
 
-    await apiFetch("/api/rename", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id,
-        title: newTitle.trim(),
-        userId,
-        guestId
-      })
-    });
+    try {
+      await apiFetch("/api/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          title: newTitle.trim(),
+          userId,
+          guestId
+        })
+      });
 
-    await loadHistory();
+      await loadHistory();
+    } finally {
+      releaseSingleFlight(actionInFlightRef.current, actionKey);
+    }
   }
 
   function newChat() {
@@ -1964,8 +2033,13 @@ export default function Home() {
   }
 
   async function shareCurrentChat() {
+    if (!acquireSingleFlight(actionInFlightRef.current, "share-chat")) {
+      return;
+    }
+
     if (!activeChatIdRef.current) {
       showToast("Open a chat with messages before sharing.");
+      releaseSingleFlight(actionInFlightRef.current, "share-chat");
       return;
     }
 
@@ -1992,6 +2066,8 @@ export default function Home() {
       showToast(
         error instanceof Error ? error.message : "Failed to share chat."
       );
+    } finally {
+      releaseSingleFlight(actionInFlightRef.current, "share-chat");
     }
   }
 

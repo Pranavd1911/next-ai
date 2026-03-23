@@ -19,6 +19,10 @@ import {
   resolveRequestOwnerId,
   trackAnalyticsEvent
 } from "@/lib/server-data";
+import {
+  finishRequestTrace,
+  startRequestTrace
+} from "@/lib/request-tracing";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -551,6 +555,10 @@ function createSseEvent(type: string, data: Record<string, unknown>) {
 }
 
 export async function POST(req: Request) {
+  const trace = startRequestTrace("api/chat");
+  let traceOwnerId: string | null = null;
+  let traceChatId: string | null = null;
+
   try {
     if (!supabaseUrl || !serviceRoleKey || !openaiKey) {
       return NextResponse.json(
@@ -577,6 +585,7 @@ export async function POST(req: Request) {
     } = body;
 
     const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
+    traceOwnerId = ownerId;
     const normalizedMessages = normalizeMessages(messages) as ChatMessage[];
     const validatedMode = validateMode(mode);
     const validatedModel = validateModel(model);
@@ -606,6 +615,7 @@ export async function POST(req: Request) {
     }
 
     let activeChatId = chatId as string | null;
+    traceChatId = activeChatId;
 
     if (activeChatId) {
       const ownership = await ensureChatOwnership(activeChatId, ownerId);
@@ -631,6 +641,7 @@ export async function POST(req: Request) {
     }
 
     activeChatId = created.chatId;
+    traceChatId = activeChatId;
 
     const latestUserMessage = getLatestUserMessage(normalizedMessages);
     const autoRememberedMemory = await rememberUserContext(
@@ -728,7 +739,7 @@ export async function POST(req: Request) {
           }
         });
 
-      return NextResponse.json(
+      const jsonResponse = NextResponse.json(
         {
           reply: assistantReply,
           chatId: activeChatId,
@@ -742,6 +753,15 @@ export async function POST(req: Request) {
           }
         }
       );
+      jsonResponse.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({
+        trace,
+        status: 200,
+        ownerId: traceOwnerId,
+        chatId: traceChatId,
+        metadata: { model: validatedModel, stream: false }
+      });
+      return jsonResponse;
     }
 
     const useLiveWeb = effectiveWebSearch && shouldUseLiveWebSearch(latestUserMessage);
@@ -814,6 +834,18 @@ export async function POST(req: Request) {
               sourcesCount: sources.length
             }
           });
+          await finishRequestTrace({
+            trace,
+            status: 200,
+            ownerId: traceOwnerId,
+            chatId: traceChatId,
+            metadata: {
+              model: validatedModel,
+              stream: true,
+              liveDataUsed: useLiveWeb,
+              sourcesCount: sources.length
+            }
+          });
 
           controller.enqueue(
             encoder.encode(
@@ -835,6 +867,20 @@ export async function POST(req: Request) {
             chatId: activeChatId,
             metadata: {
               reason:
+                streamError instanceof Error
+                  ? streamError.message
+                  : "Streaming failure"
+            }
+          });
+          await finishRequestTrace({
+            trace,
+            status: 500,
+            ownerId: traceOwnerId,
+            chatId: traceChatId,
+            metadata: {
+              model: validatedModel,
+              stream: true,
+              error:
                 streamError instanceof Error
                   ? streamError.message
                   : "Streaming failure"
@@ -863,7 +909,8 @@ export async function POST(req: Request) {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
-        "X-Chat-Id": String(activeChatId)
+        "X-Chat-Id": String(activeChatId),
+        "X-Request-Id": trace.requestId
       }
     });
   } catch (error) {
@@ -874,9 +921,20 @@ export async function POST(req: Request) {
       "We could not process that message right now. Please try again."
     );
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: friendly.message },
       { status: friendly.status }
     );
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: friendly.status,
+      ownerId: traceOwnerId,
+      chatId: traceChatId,
+      metadata: {
+        error: error instanceof Error ? error.message : "Unknown chat error"
+      }
+    });
+    return response;
   }
 }

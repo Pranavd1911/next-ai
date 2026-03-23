@@ -22,6 +22,48 @@ export type MemoryItemRecord = {
   created_at: string;
 };
 
+export async function upsertFileExtractionJob(params: {
+  ownerId: string;
+  fileHash: string;
+  chatId?: string | null;
+  mimeType: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  errorMessage?: string;
+}) {
+  const payload = {
+    owner_id: params.ownerId,
+    file_hash: params.fileHash,
+    chat_id: params.chatId || null,
+    mime_type: params.mimeType,
+    status: params.status,
+    error_message: params.errorMessage || "",
+    updated_at: new Date().toISOString()
+  };
+
+  const { data: existing } = await supabaseAdmin
+    .from("file_extraction_jobs")
+    .select("id")
+    .eq("owner_id", params.ownerId)
+    .eq("file_hash", params.fileHash)
+    .maybeSingle();
+
+  if (existing?.id) {
+    await supabaseAdmin
+      .from("file_extraction_jobs")
+      .update(payload)
+      .eq("id", existing.id);
+    return existing.id;
+  }
+
+  const { data } = await supabaseAdmin
+    .from("file_extraction_jobs")
+    .insert(payload)
+    .select("id")
+    .single();
+
+  return data?.id || null;
+}
+
 export async function getUserPreferences(ownerId: string) {
   const { data } = await supabaseAdmin
     .from("user_preferences")

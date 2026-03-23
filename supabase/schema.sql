@@ -82,6 +82,18 @@ create table if not exists file_extractions (
   primary key (owner_id, file_hash)
 );
 
+create table if not exists file_extraction_jobs (
+  id uuid primary key default gen_random_uuid(),
+  owner_id text not null,
+  file_hash text not null,
+  chat_id uuid references chats(id) on delete set null,
+  mime_type text not null default '',
+  status text not null default 'queued',
+  error_message text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists messages_chat_id_created_at_idx
 on messages (chat_id, created_at);
 
@@ -99,6 +111,9 @@ on rate_limit_events (owner_id, route, created_at desc);
 
 create index if not exists file_extractions_owner_updated_at_idx
 on file_extractions (owner_id, updated_at desc);
+
+create index if not exists file_extraction_jobs_owner_status_updated_at_idx
+on file_extraction_jobs (owner_id, status, updated_at desc);
 
 alter table chats enable row level security;
 alter table messages enable row level security;

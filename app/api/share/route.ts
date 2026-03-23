@@ -1,18 +1,29 @@
 import { NextResponse } from "next/server";
 import { getFriendlyApiError } from "@/lib/api-guards";
 import { resolveRequestOwnerId, supabaseAdmin, trackAnalyticsEvent } from "@/lib/server-data";
+import {
+  finishRequestTrace,
+  startRequestTrace
+} from "@/lib/request-tracing";
 
 export async function POST(req: Request) {
+  const trace = startRequestTrace("api/share:post");
+  let ownerId: string | null = null;
+  let chatId: string | null = null;
+
   try {
     const body = await req.json();
-    const ownerId = await resolveRequestOwnerId(req, {
+    ownerId = await resolveRequestOwnerId(req, {
       userId: body.userId,
       guestId: body.guestId
     });
-    const chatId = typeof body.chatId === "string" ? body.chatId : "";
+    chatId = typeof body.chatId === "string" ? body.chatId : "";
 
     if (!chatId) {
-      return NextResponse.json({ error: "Chat id is required." }, { status: 400 });
+      const response = NextResponse.json({ error: "Chat id is required." }, { status: 400 });
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 400, ownerId, chatId });
+      return response;
     }
 
     const { data: chat, error: chatError } = await supabaseAdmin
@@ -22,11 +33,17 @@ export async function POST(req: Request) {
       .single();
 
     if (chatError || !chat) {
-      return NextResponse.json({ error: "Chat not found." }, { status: 404 });
+      const response = NextResponse.json({ error: "Chat not found." }, { status: 404 });
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 404, ownerId, chatId });
+      return response;
     }
 
     if (chat.user_id !== ownerId) {
-      return NextResponse.json({ error: "Unauthorized chat access." }, { status: 403 });
+      const response = NextResponse.json({ error: "Unauthorized chat access." }, { status: 403 });
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 403, ownerId, chatId });
+      return response;
     }
 
     const { data: existing } = await supabaseAdmin
@@ -50,7 +67,10 @@ export async function POST(req: Request) {
       ).data?.id;
 
     if (!shareId) {
-      return NextResponse.json({ error: "Failed to create share link." }, { status: 500 });
+      const response = NextResponse.json({ error: "Failed to create share link." }, { status: 500 });
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 500, ownerId, chatId });
+      return response;
     }
 
     await trackAnalyticsEvent({
@@ -60,20 +80,38 @@ export async function POST(req: Request) {
       metadata: { shareId }
     });
 
-    return NextResponse.json({ shareId, shareUrl: `/share/${shareId}` });
+    const response = NextResponse.json({ shareId, shareUrl: `/share/${shareId}` });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({ trace, status: 200, ownerId, chatId });
+    return response;
   } catch (error) {
     const friendly = getFriendlyApiError(error, "Failed to share chat.");
-    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
+    const response = NextResponse.json({ error: friendly.message }, { status: friendly.status });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: friendly.status,
+      ownerId,
+      chatId,
+      metadata: { error: error instanceof Error ? error.message : "Unknown share error" }
+    });
+    return response;
   }
 }
 
 export async function GET(req: Request) {
+  const trace = startRequestTrace("api/share:get");
+  let shareId: string | null = null;
+
   try {
     const { searchParams } = new URL(req.url);
-    const shareId = searchParams.get("shareId");
+    shareId = searchParams.get("shareId");
 
     if (!shareId) {
-      return NextResponse.json({ error: "Share id is required." }, { status: 400 });
+      const response = NextResponse.json({ error: "Share id is required." }, { status: 400 });
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 400, metadata: { shareId } });
+      return response;
     }
 
     const { data: sharedChat, error: shareError } = await supabaseAdmin
@@ -83,7 +121,10 @@ export async function GET(req: Request) {
       .single();
 
     if (shareError || !sharedChat) {
-      return NextResponse.json({ error: "Shared chat not found." }, { status: 404 });
+      const response = NextResponse.json({ error: "Shared chat not found." }, { status: 404 });
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 404, metadata: { shareId } });
+      return response;
     }
 
     const { data: chat } = await supabaseAdmin
@@ -98,13 +139,26 @@ export async function GET(req: Request) {
       .eq("chat_id", sharedChat.chat_id)
       .order("created_at", { ascending: true });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       id: sharedChat.id,
       chat,
       messages: messages || []
     });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({ trace, status: 200, metadata: { shareId } });
+    return response;
   } catch (error) {
     const friendly = getFriendlyApiError(error, "Failed to load shared chat.");
-    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
+    const response = NextResponse.json({ error: friendly.message }, { status: friendly.status });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: friendly.status,
+      metadata: {
+        shareId,
+        error: error instanceof Error ? error.message : "Unknown share read error"
+      }
+    });
+    return response;
   }
 }

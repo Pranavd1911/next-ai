@@ -6,13 +6,21 @@ import {
   getFriendlyApiError,
   validateFile
 } from "@/lib/api-guards";
-import { resolveRequestOwnerId } from "@/lib/server-data";
+import { resolveRequestOwnerId, upsertFileExtractionJob } from "@/lib/server-data";
+import { extractPdfTextFromBuffer } from "@/lib/pdf-extraction";
+import {
+  hasSufficientEmbeddedText,
+  mergeExtractedTextSegments,
+  shouldStopEarlyDuringOcr
+} from "@/lib/upload-utils";
+import {
+  finishRequestTrace,
+  startRequestTrace
+} from "@/lib/request-tracing";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const openaiKey = process.env.OPENAI_API_KEY!;
-const OCR_EARLY_EXIT_TEXT_LENGTH = 700;
-const EMBEDDED_TEXT_SUFFICIENT_LENGTH = 120;
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -25,29 +33,7 @@ async function extractEmbeddedText(file: File, buffer: Buffer) {
 
   try {
     if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
-      const pdfParseModule = await import("pdf-parse");
-      const PDFParse = (pdfParseModule as { PDFParse?: unknown }).PDFParse;
-      const PDFParseCtor = PDFParse as
-        | (new (options: { data: Buffer }) => {
-            getText: (params?: { first?: number }) => Promise<{ text?: string }>;
-            destroy: () => Promise<void>;
-          })
-        | undefined;
-
-      if (typeof PDFParseCtor !== "function") {
-        throw new Error("pdf-parse did not export the PDFParse class.");
-      }
-
-      const parser = new PDFParseCtor({ data: buffer });
-
-      try {
-        const result = await parser.getText({
-          first: 5
-        });
-        return (result?.text || "").trim();
-      } finally {
-        await parser.destroy();
-      }
+      return await extractPdfTextFromBuffer(buffer, { maxPages: 5 });
     }
 
     if (
@@ -168,6 +154,13 @@ async function saveCachedExtraction(params: {
 // MAIN ROUTE
 // ------------------------
 export async function POST(req: Request) {
+  const trace = startRequestTrace("api/upload");
+  let ownerId: string | null = null;
+  let activeChatId: string | null = null;
+  let extractionJobId: string | null = null;
+  let currentFileHash: string | null = null;
+  let currentMimeType = "";
+
   try {
     const formData = await req.formData();
 
@@ -176,7 +169,7 @@ export async function POST(req: Request) {
     const guestId = (formData.get("guestId") as string) || null;
     let chatId = (formData.get("chatId") as string) || null;
 
-    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
+    ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     if (!file) {
       return NextResponse.json(
@@ -243,14 +236,24 @@ export async function POST(req: Request) {
 
       chatId = newChat.id;
     }
+    activeChatId = chatId;
 
     // ------------------------
     // UPLOAD FILE
     // ------------------------
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileHash = createHash("sha256").update(buffer).digest("hex");
+    currentFileHash = fileHash;
+    currentMimeType = file.type || "application/octet-stream";
     const safeName = file.name.replace(/\s+/g, "_");
     const filePath = `${ownerId}/${Date.now()}-${safeName}`;
+    extractionJobId = await upsertFileExtractionJob({
+      ownerId,
+      fileHash,
+      chatId,
+      mimeType: currentMimeType,
+      status: "processing"
+    });
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from("uploads")
@@ -271,7 +274,7 @@ export async function POST(req: Request) {
       .getPublicUrl(filePath);
 
     const fileUrl = publicUrlData.publicUrl;
-    const mimeType = file.type || "application/octet-stream";
+    const mimeType = currentMimeType || file.type || "application/octet-stream";
 
     // ------------------------
     // TEXT EXTRACTION
@@ -286,7 +289,7 @@ export async function POST(req: Request) {
     } else {
       extractedText = await extractEmbeddedText(file, buffer);
 
-      if (extractedText.trim().length >= EMBEDDED_TEXT_SUFFICIENT_LENGTH) {
+      if (hasSufficientEmbeddedText(extractedText)) {
         extractionStatus = "TEXT_EXTRACTED";
       } else if (ocrImages.length > 0) {
         let combinedText = extractedText.trim();
@@ -294,12 +297,10 @@ export async function POST(req: Request) {
         for (const img of ocrImages) {
           const pageText = await runVisionOcr(img);
           if (pageText.trim()) {
-            combinedText = [combinedText, pageText.trim()]
-              .filter(Boolean)
-              .join("\n\n");
+            combinedText = mergeExtractedTextSegments(combinedText, pageText);
           }
 
-          if (combinedText.length >= OCR_EARLY_EXIT_TEXT_LENGTH) {
+          if (shouldStopEarlyDuringOcr(combinedText)) {
             break;
           }
         }
@@ -318,6 +319,14 @@ export async function POST(req: Request) {
         extractionStatus
       });
     }
+
+    await upsertFileExtractionJob({
+      ownerId,
+      fileHash,
+      chatId,
+      mimeType,
+      status: "completed"
+    });
 
     extractedText = extractedText.slice(0, 20000);
 
@@ -348,7 +357,7 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       chatId,
       fileName: file.name,
@@ -359,15 +368,53 @@ export async function POST(req: Request) {
       extractedLength: extractedText.length,
       messageContent
     });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: 200,
+      ownerId,
+      chatId: activeChatId,
+      metadata: {
+        mimeType,
+        extractionStatus,
+        cachedExtraction: !!cachedExtraction,
+        extractionJobId
+      }
+    });
+    return response;
   } catch (error) {
     const friendly = getFriendlyApiError(
       error,
       "File upload failed. Please try a smaller supported file."
     );
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: friendly.message },
       { status: friendly.status }
     );
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: friendly.status,
+      ownerId,
+      chatId: activeChatId,
+      metadata: {
+        extractionJobId,
+        error:
+          error instanceof Error ? error.message : "Unknown upload failure"
+      }
+    });
+    if (ownerId && currentFileHash) {
+      await upsertFileExtractionJob({
+        ownerId,
+        fileHash: currentFileHash,
+        chatId: activeChatId,
+        mimeType: currentMimeType,
+        status: "failed",
+        errorMessage:
+          error instanceof Error ? error.message : "Unknown upload failure"
+      });
+    }
+    return response;
   }
 }
