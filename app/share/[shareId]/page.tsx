@@ -31,27 +31,45 @@ export default async function SharedChatPage({
 
   if (data.error) {
     return (
-      <div style={{ minHeight: "100vh", background: "#121212", color: "white", padding: 24 }}>
-        <div style={{ maxWidth: 860, margin: "0 auto" }}>
-          <a href="/" style={{ color: "#cbd5e1", textDecoration: "none" }}>
+      <div className="app-page">
+        <div className="shared-wrap">
+          <a href="/" className="page-back">
             ← Back to Nexa
           </a>
-          <h1>Shared chat not found</h1>
-          <div style={{ color: "#94a3b8" }}>{data.error}</div>
+
+          <div className="hero-panel">
+            <div className="hero-eyebrow">Public Share</div>
+            <h1 className="hero-title">Shared chat not found.</h1>
+            <p className="hero-copy">{data.error}</p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#121212", color: "white", padding: 24 }}>
-      <div style={{ maxWidth: 860, margin: "0 auto" }}>
-        <a href="/" style={{ color: "#cbd5e1", textDecoration: "none" }}>
+    <div className="app-page">
+      <div className="shared-wrap">
+        <a href="/" className="page-back">
           ← Back to Nexa
         </a>
-        <h1 style={{ marginBottom: 6 }}>{data.chat?.title || "Shared Chat"}</h1>
-        <div style={{ color: "#94a3b8", marginBottom: 24 }}>
-          Public share view
+
+        <div className="hero-panel">
+          <div className="hero-eyebrow">Public Share</div>
+          <h1 className="hero-title">{data.chat?.title || "Shared Chat"}</h1>
+          <p className="hero-copy">
+            A public, read-only snapshot of a Nexa conversation.
+          </p>
+
+          <div className="shared-meta">
+            <div className="shared-pill">View only</div>
+            <div className="shared-pill">Nexa conversation</div>
+            {data.chat?.created_at && (
+              <div className="shared-pill">
+                {new Date(data.chat.created_at).toLocaleDateString()}
+              </div>
+            )}
+          </div>
         </div>
 
         {(data.messages || []).map((message, index) => (
@@ -66,15 +84,27 @@ export default async function SharedChatPage({
             <div
               style={{
                 maxWidth: "80%",
-                background: message.role === "user" ? "#2f6fed" : "#1f1f1f",
-                border: "1px solid #333",
-                borderRadius: 16,
-                padding: "12px 14px",
+                background:
+                  message.role === "user"
+                    ? "linear-gradient(135deg, rgba(43,109,196,0.96), rgba(27,80,154,0.98))"
+                    : "linear-gradient(180deg, rgba(14,24,41,0.92), rgba(10,17,29,0.96))",
+                border: "1px solid rgba(126, 164, 206, 0.14)",
+                borderRadius: 20,
+                padding: "14px 16px",
                 whiteSpace: "pre-wrap",
-                lineHeight: 1.6
+                lineHeight: 1.7,
+                boxShadow: "0 18px 40px rgba(0,0,0,0.2)"
               }}
             >
-              <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  opacity: 0.82,
+                  marginBottom: 8,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em"
+                }}
+              >
                 {message.role === "user" ? "You" : "Nexa"}
               </div>
               {message.content}

@@ -515,11 +515,26 @@ function extractWebSourcesFromResponse(finalResponse: any) {
     if (!Array.isArray(itemSources)) continue;
 
     for (const source of itemSources) {
-      const title =
+      const url = typeof source?.url === "string" ? source.url : "";
+      let hostname = "source";
+
+      try {
+        hostname = new URL(url).hostname.replace(/^www\./, "");
+      } catch {}
+
+      const rawTitle =
         typeof source?.title === "string" && source.title.trim().length > 0
           ? source.title.trim()
-          : "Source";
-      const url = typeof source?.url === "string" ? source.url : "";
+          : "";
+      const normalizedTitle = rawTitle
+        .replace(/\s*\|\s*[^|]+$/, "")
+        .replace(/\s*[-:]\s*[^-:]+$/, "")
+        .trim();
+      const title =
+        normalizedTitle &&
+        !["source", "article", "link"].includes(normalizedTitle.toLowerCase())
+          ? normalizedTitle
+          : hostname;
 
       if (!url) continue;
       if (sources.some((existing) => existing.url === url)) continue;

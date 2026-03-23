@@ -5,6 +5,8 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 
 export default function SignupPage() {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   useEffect(() => {
     async function checkUser() {
@@ -23,13 +25,16 @@ export default function SignupPage() {
   async function handleSignup(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setError("");
+    setSuccess("");
 
     const form = e.currentTarget;
     const email = (form.email as HTMLInputElement).value.trim();
     const password = (form.password as HTMLInputElement).value;
 
     const redirectUrl =
-      process.env.NEXT_PUBLIC_APP_URL || "https://next-ai-git-main-pranavd1911s-projects.vercel.app";
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "https://next-ai-git-main-pranavd1911s-projects.vercel.app";
 
     const { error } = await supabaseBrowser.auth.signUp({
       email,
@@ -42,106 +47,68 @@ export default function SignupPage() {
     setLoading(false);
 
     if (error) {
-      alert(error.message);
+      setError(error.message);
     } else {
-      alert("Check your email to confirm your account.");
+      setSuccess("Check your email to confirm your account.");
     }
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#212121",
-        color: "white",
-        fontFamily: "Arial, sans-serif",
-        padding: 20
-      }}
-    >
-      <form
-        onSubmit={handleSignup}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          width: "100%",
-          maxWidth: 360,
-          background: "#1f1f1f",
-          border: "1px solid #333",
-          borderRadius: 16,
-          padding: 24,
-          boxSizing: "border-box"
-        }}
-      >
-        <h2 style={{ margin: 0, marginBottom: 6 }}>Sign Up</h2>
+    <div className="auth-shell">
+      <div className="auth-grid">
+        <div className="auth-card">
+          <div className="hero-eyebrow">Nexa AI</div>
+          <h1 className="hero-title">Create your production workspace.</h1>
+          <p className="hero-copy">
+            Get persistent memory, shareable chats, research with citations, voice chat,
+            and synced preferences across sessions.
+          </p>
 
-        <div style={{ color: "#9ca3af", fontSize: 14, marginBottom: 8 }}>
-          Create your NEXA AI account
+          <ul className="auth-list">
+            <li>Keep context across chats without re-explaining yourself</li>
+            <li>Upload files, analyze images, and switch into code mode instantly</li>
+            <li>Track usage trends and manage saved memory from one place</li>
+          </ul>
         </div>
 
-        <input
-          name="email"
-          type="email"
-          placeholder="Email"
-          required
-          style={{
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid #444",
-            background: "#2a2a2a",
-            color: "white",
-            outline: "none"
-          }}
-        />
+        <div className="auth-card">
+          <div className="hero-eyebrow">Create Account</div>
+          <h2 style={{ marginTop: 16, marginBottom: 8 }}>Sign Up</h2>
+          <p className="muted-copy" style={{ marginTop: 0, marginBottom: 18 }}>
+            Create your Nexa account and confirm it from your email.
+          </p>
 
-        <input
-          name="password"
-          type="password"
-          placeholder="Password"
-          required
-          minLength={6}
-          style={{
-            padding: 12,
-            borderRadius: 10,
-            border: "1px solid #444",
-            background: "#2a2a2a",
-            color: "white",
-            outline: "none"
-          }}
-        />
+          <form onSubmit={handleSignup} className="auth-form">
+            <label className="field">
+              <span className="field-label">Email</span>
+              <input className="field-input" name="email" type="email" placeholder="you@example.com" required />
+            </label>
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: 12,
-            borderRadius: 10,
-            border: "none",
-            background: "#2b3445",
-            color: "white",
-            cursor: loading ? "not-allowed" : "pointer",
-            opacity: loading ? 0.7 : 1
-          }}
-        >
-          {loading ? "Signing up..." : "Sign Up"}
-        </button>
+            <label className="field">
+              <span className="field-label">Password</span>
+              <input
+                className="field-input"
+                name="password"
+                type="password"
+                placeholder="At least 6 characters"
+                required
+                minLength={6}
+              />
+            </label>
 
-        <a
-          href="/login"
-          style={{
-            color: "#9ca3af",
-            textDecoration: "none",
-            fontSize: 14,
-            textAlign: "center",
-            marginTop: 4
-          }}
-        >
-          Already have an account? Login
-        </a>
-      </form>
+            {error && <div className="inline-message error">{error}</div>}
+            {success && <div className="inline-message success">{success}</div>}
+
+            <button type="submit" disabled={loading}>
+              {loading ? "Signing up..." : "Create account"}
+            </button>
+
+            <a href="/login" className="muted small">
+              Already have an account? Login
+            </a>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

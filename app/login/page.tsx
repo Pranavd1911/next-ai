@@ -5,6 +5,7 @@ import { supabaseBrowser } from "@/lib/supabase-browser";
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     async function checkUser() {
@@ -20,12 +21,14 @@ export default function LoginPage() {
     checkUser();
   }, []);
 
-  async function handleLogin(e: any) {
+  async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setError("");
 
-    const email = e.target.email.value;
-    const password = e.target.password.value;
+    const form = e.currentTarget;
+    const email = (form.email as HTMLInputElement).value.trim();
+    const password = (form.password as HTMLInputElement).value;
 
     const { error } = await supabaseBrowser.auth.signInWithPassword({
       email,
@@ -35,80 +38,60 @@ export default function LoginPage() {
     setLoading(false);
 
     if (error) {
-      alert(error.message);
+      setError(error.message);
     } else {
       window.location.href = "/";
     }
   }
 
   return (
-    <div
-      style={{
-        height: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#212121",
-        color: "white"
-      }}
-    >
-      <form
-        onSubmit={handleLogin}
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          width: 300
-        }}
-      >
-        <h2>Login</h2>
+    <div className="auth-shell">
+      <div className="auth-grid">
+        <div className="auth-card">
+          <div className="hero-eyebrow">Nexa AI</div>
+          <h1 className="hero-title">Return to your workspace.</h1>
+          <p className="hero-copy">
+            Pick up where you left off with memory-aware chat, voice mode, file analysis,
+            research answers with sources, and shareable conversations.
+          </p>
 
-        <input
-          name="email"
-          placeholder="Email"
-          required
-          style={{
-            padding: 10,
-            borderRadius: 8,
-            border: "1px solid #444",
-            background: "#2a2a2a",
-            color: "white"
-          }}
-        />
+          <ul className="auth-list">
+            <li>Persistent memory and chat history across devices</li>
+            <li>Voice chat, web research, code mode, and image reasoning</li>
+            <li>Shareable chats and a private analytics dashboard</li>
+          </ul>
+        </div>
 
-        <input
-          name="password"
-          type="password"
-          placeholder="Password"
-          required
-          style={{
-            padding: 10,
-            borderRadius: 8,
-            border: "1px solid #444",
-            background: "#2a2a2a",
-            color: "white"
-          }}
-        />
+        <div className="auth-card">
+          <div className="hero-eyebrow">Account Access</div>
+          <h2 style={{ marginTop: 16, marginBottom: 8 }}>Login</h2>
+          <p className="muted-copy" style={{ marginTop: 0, marginBottom: 18 }}>
+            Sign in to sync your chats, preferences, and saved memory.
+          </p>
 
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: 10,
-            borderRadius: 8,
-            border: "none",
-            background: "#2b3445",
-            color: "white",
-            cursor: "pointer"
-          }}
-        >
-          {loading ? "Logging in..." : "Login"}
-        </button>
+          <form onSubmit={handleLogin} className="auth-form">
+            <label className="field">
+              <span className="field-label">Email</span>
+              <input className="field-input" name="email" type="email" placeholder="you@example.com" required />
+            </label>
 
-        <a href="/signup" style={{ color: "#9ca3af" }}>
-          Don’t have an account? Sign up
-        </a>
-      </form>
+            <label className="field">
+              <span className="field-label">Password</span>
+              <input className="field-input" name="password" type="password" placeholder="Your password" required />
+            </label>
+
+            {error && <div className="inline-message error">{error}</div>}
+
+            <button type="submit" disabled={loading}>
+              {loading ? "Logging in..." : "Login"}
+            </button>
+
+            <a href="/signup" className="muted small">
+              Don’t have an account? Create one
+            </a>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

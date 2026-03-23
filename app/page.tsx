@@ -208,6 +208,18 @@ function SparklesIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+function WaveformIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <IconBase {...props}>
+      <path d="M3 12h2" />
+      <path d="M7 8v8" />
+      <path d="M12 5v14" />
+      <path d="M17 8v8" />
+      <path d="M21 12h-2" />
+    </IconBase>
+  );
+}
+
 function PlusIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <IconBase {...props}>
@@ -254,6 +266,35 @@ function getLanguageLabel(lang: VoiceLanguage) {
     "ja-JP": "Japanese"
   };
   return labels[lang];
+}
+
+function getSourceHostname(url: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
+
+function formatSourceLabel(source: { title: string; url: string }) {
+  const hostname = getSourceHostname(source.url);
+  const title = (source.title || "").trim();
+
+  if (!title || ["source", "article", "link"].includes(title.toLowerCase())) {
+    return hostname;
+  }
+
+  const cleanedTitle = title
+    .replace(/\s*\|\s*[^|]+$/, "")
+    .replace(/\s*[-:]\s*[^-:]+$/, "")
+    .trim();
+
+  if (!cleanedTitle) return hostname;
+
+  const shortTitle =
+    cleanedTitle.length > 42 ? `${cleanedTitle.slice(0, 39).trim()}...` : cleanedTitle;
+
+  return `${hostname} · ${shortTitle}`;
 }
 
 export default function Home() {
@@ -307,6 +348,7 @@ export default function Home() {
   const messagesRef = useRef<Msg[]>([]);
   const activeChatIdRef = useRef<string | null>(null);
   const handsFreeRef = useRef(false);
+  const fullVoiceRef = useRef(false);
   const voiceAssistantRef = useRef(true);
   const isSpeakingRef = useRef(false);
   const manualMicModeRef = useRef(false);
@@ -518,6 +560,10 @@ export default function Home() {
   }, [handsFreeWakeMode]);
 
   useEffect(() => {
+    fullVoiceRef.current = fullVoiceMode;
+  }, [fullVoiceMode]);
+
+  useEffect(() => {
     voiceAssistantRef.current = voiceAssistantOn;
   }, [voiceAssistantOn]);
 
@@ -564,6 +610,12 @@ export default function Home() {
       recognitionRef.current?.stop();
     } catch {}
     setIsListening(false);
+  }
+
+  function getIdleVoiceStatus() {
+    if (fullVoiceRef.current) return "Voice chat ready";
+    if (handsFreeRef.current) return "Hands-free ready";
+    return "Wake phrase: Hey Nexa";
   }
 
   function stopSpeaking() {
@@ -618,18 +670,20 @@ export default function Home() {
 
     utterance.onstart = () => {
       isSpeakingRef.current = true;
-      setVoiceStatus(fullVoiceMode ? "Speaking. Tap mic to interrupt." : "Speaking...");
+      setVoiceStatus(
+        fullVoiceRef.current ? "Speaking. Tap mic to interrupt." : "Speaking..."
+      );
     };
 
     utterance.onend = () => {
       isSpeakingRef.current = false;
-      setVoiceStatus("Wake phrase: Hey Nexa");
+      setVoiceStatus(getIdleVoiceStatus());
       scheduleHandsFreeRestart(600);
     };
 
     utterance.onerror = () => {
       isSpeakingRef.current = false;
-      setVoiceStatus("Wake phrase: Hey Nexa");
+      setVoiceStatus(getIdleVoiceStatus());
       scheduleHandsFreeRestart(600);
     };
 
@@ -848,7 +902,9 @@ export default function Home() {
     recognition.onstart = () => {
       setIsListening(true);
       setVoiceStatus(
-        handsFreeRef.current
+        fullVoiceRef.current
+          ? `Voice chat listening in ${getLanguageLabel(voiceLanguage)}`
+          : handsFreeRef.current
           ? `Hands-free listening in ${getLanguageLabel(voiceLanguage)}`
           : `Listening in ${getLanguageLabel(voiceLanguage)}`
       );
@@ -860,7 +916,7 @@ export default function Home() {
       if (manualMicModeRef.current) {
         manualMicModeRef.current = false;
         if (!handsFreeRef.current) {
-          setVoiceStatus("Wake phrase: Hey Nexa");
+          setVoiceStatus(getIdleVoiceStatus());
         }
         return;
       }
@@ -868,7 +924,7 @@ export default function Home() {
       if (handsFreeRef.current) {
         scheduleHandsFreeRestart(700);
       } else {
-        setVoiceStatus("Wake phrase: Hey Nexa");
+        setVoiceStatus(getIdleVoiceStatus());
       }
     };
 
@@ -878,16 +934,16 @@ export default function Home() {
       if (manualMicModeRef.current) {
         manualMicModeRef.current = false;
         if (!handsFreeRef.current) {
-          setVoiceStatus("Mic stopped");
+          setVoiceStatus(getIdleVoiceStatus());
         }
         return;
       }
 
       if (handsFreeRef.current) {
-        setVoiceStatus("Hands-free retrying...");
+        setVoiceStatus(fullVoiceRef.current ? "Reconnecting voice..." : "Hands-free reconnecting...");
         scheduleHandsFreeRestart(1200);
       } else {
-        setVoiceStatus("Mic stopped");
+        setVoiceStatus(getIdleVoiceStatus());
       }
     };
 
@@ -972,7 +1028,7 @@ export default function Home() {
       userStoppedRef.current = false;
       clearRestartTimer();
       stopListening();
-      setVoiceStatus("Wake phrase: Hey Nexa");
+      setVoiceStatus(getIdleVoiceStatus());
       return;
     }
 
@@ -1200,7 +1256,7 @@ export default function Home() {
     setFullVoiceMode(next);
     setVoiceAssistantOn(next ? true : voiceAssistantOn);
     setHandsFreeWakeMode(next ? true : handsFreeWakeMode);
-    setVoiceStatus(next ? "Full voice mode on" : "Wake phrase: Hey Nexa");
+    setVoiceStatus(next ? "Voice chat ready" : getIdleVoiceStatus());
     if (next && !loadingRef.current && !isSpeakingRef.current) {
       scheduleHandsFreeRestart(200);
     }
@@ -2367,17 +2423,44 @@ export default function Home() {
               >
                 <div
                   style={{
-                    cursor: "pointer",
-                    marginBottom: 8,
-                    color: "#f5fbff",
-                    fontWeight: 600,
-                    wordBreak: "break-word",
-                    fontSize: 14,
-                    lineHeight: 1.4
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    marginBottom: 8
                   }}
-                  onClick={() => loadChat(h.id)}
                 >
-                  {h.title || "New Chat"}
+                  <div
+                    style={{
+                      cursor: "pointer",
+                      color: "#f5fbff",
+                      fontWeight: 600,
+                      wordBreak: "break-word",
+                      fontSize: 14,
+                      lineHeight: 1.4,
+                      flex: 1
+                    }}
+                    onClick={() => loadChat(h.id)}
+                  >
+                    {h.title || "New Chat"}
+                  </div>
+
+                  {activeChatId === h.id && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        color: "#84d9ff",
+                        border: "1px solid rgba(132,217,255,0.28)",
+                        borderRadius: 999,
+                        padding: "3px 7px",
+                        whiteSpace: "nowrap",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.08em"
+                      }}
+                    >
+                      Open
+                    </span>
+                  )}
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -3137,10 +3220,15 @@ export default function Home() {
                                   ...smallButtonStyle,
                                   textDecoration: "none",
                                   display: "inline-flex",
-                                  alignItems: "center"
+                                  alignItems: "center",
+                                  maxWidth: "100%",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap"
                                 }}
+                                title={source.title || source.url}
                               >
-                                Source: {source.title}
+                                {formatSourceLabel(source)}
                               </a>
                             ))}
 
@@ -3491,8 +3579,8 @@ export default function Home() {
                         }}
                         onClick={toggleFullVoiceMode}
                       >
-                        <VolumeOnIcon width={18} height={18} />
-                        <span>{fullVoiceMode ? "Full voice on" : "Full voice off"}</span>
+                        <WaveformIcon width={18} height={18} />
+                        <span>{fullVoiceMode ? "Voice chat on" : "Voice chat off"}</span>
                       </button>
 
                       <button
@@ -3681,7 +3769,7 @@ export default function Home() {
                   onClick={toggleHandsFree}
                   title="Hands-free wake mode"
                 >
-                  <SparklesIcon width={18} height={18} />
+                  <WaveformIcon width={18} height={18} />
                 </button>
 
                 <button
@@ -3692,9 +3780,9 @@ export default function Home() {
                     border: fullVoiceMode ? "1px solid #46c2ff" : "1px solid #3b465a"
                   }}
                   onClick={toggleFullVoiceMode}
-                  title="Full voice mode"
+                  title="Voice chat mode"
                 >
-                  <VolumeOnIcon width={18} height={18} />
+                  <SparklesIcon width={18} height={18} />
                 </button>
 
                 <button

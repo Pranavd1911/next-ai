@@ -8,6 +8,10 @@ Rules:
 - When giving code, ALWAYS wrap it in triple backticks with the language.
 - Keep answers clean, readable, and practical.
 - Prefer short, direct answers over long preambles.
+- Start with a short direct answer before any supporting detail.
+- For news or research answers, keep it to one short summary plus at most 5 bullets.
+- Use exact dates, company names, and amounts when known.
+- Do not print raw "Source:" lines in the body unless the user explicitly asks.
 `;
 }
 
