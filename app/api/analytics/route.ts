@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { getFriendlyApiError } from "@/lib/api-guards";
-import { supabaseAdmin } from "@/lib/server-data";
+import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const ownerId = await resolveRequestOwnerId(req, {
+      userId: new URL(req.url).searchParams.get("userId"),
+      guestId: null
+    });
     const today = new Date().toISOString().slice(0, 10);
     const sevenDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
       .toISOString()
@@ -14,22 +18,26 @@ export async function GET() {
         .from("analytics_events")
         .select("owner_id")
         .gte("created_at", `${today}T00:00:00.000Z`)
+        .eq("owner_id", ownerId)
         .not("owner_id", "is", null),
       supabaseAdmin
         .from("analytics_events")
         .select("owner_id")
         .eq("event_name", "chat_success")
-        .gte("created_at", `${today}T00:00:00.000Z`),
+        .gte("created_at", `${today}T00:00:00.000Z`)
+        .eq("owner_id", ownerId),
       supabaseAdmin
         .from("analytics_events")
         .select("event_name, metadata, created_at")
         .gte("created_at", `${today}T00:00:00.000Z`)
+        .eq("owner_id", ownerId)
         .order("created_at", { ascending: false })
         .limit(200),
       supabaseAdmin
         .from("analytics_events")
         .select("event_name, owner_id, created_at")
         .gte("created_at", `${sevenDaysAgo}T00:00:00.000Z`)
+        .eq("owner_id", ownerId)
         .order("created_at", { ascending: true })
     ]);
 

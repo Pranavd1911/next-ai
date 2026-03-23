@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { getFriendlyApiError, requireOwnerId } from "@/lib/api-guards";
+import { getFriendlyApiError } from "@/lib/api-guards";
 import {
   deleteMemoryItem,
   getMemoryItems,
   getUserPreferences,
+  resolveRequestOwnerId,
   supabaseAdmin,
   syncPreferenceMemory
 } from "@/lib/server-data";
@@ -13,7 +14,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get("userId");
     const guestId = searchParams.get("guestId");
-    const ownerId = requireOwnerId(userId, guestId);
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     const preferences = await getUserPreferences(ownerId);
     const memoryItems = await getMemoryItems(ownerId);
@@ -33,7 +34,10 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const ownerId = requireOwnerId(body.userId, body.guestId);
+    const ownerId = await resolveRequestOwnerId(req, {
+      userId: body.userId,
+      guestId: body.guestId
+    });
     const prefersDirectAnswers = body.prefersDirectAnswers !== false;
     const webSearchEnabled = body.webSearchEnabled !== false;
     const codeModeEnabled = body.codeModeEnabled === true;
@@ -72,7 +76,7 @@ export async function DELETE(req: Request) {
     const userId = searchParams.get("userId");
     const guestId = searchParams.get("guestId");
     const memoryId = searchParams.get("memoryId");
-    const ownerId = requireOwnerId(userId, guestId);
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     if (!memoryId) {
       return NextResponse.json({ error: "Memory id is required." }, { status: 400 });

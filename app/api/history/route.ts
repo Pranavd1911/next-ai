@@ -1,24 +1,18 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getFriendlyApiError } from "@/lib/api-guards";
+import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get("userId");
     const guestId = searchParams.get("guestId");
-
-    const ownerId = userId || guestId;
-
-    if (!ownerId) {
+    if (!userId && !guestId) {
       return NextResponse.json([]);
     }
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("chats")
       .select("id, title, created_at")
       .eq("user_id", ownerId)
@@ -33,12 +27,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json(data || []);
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to load history."
-      },
-      { status: 500 }
-    );
+    const friendly = getFriendlyApiError(error, "Failed to load history.");
+    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
   }
 }

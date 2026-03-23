@@ -7,6 +7,7 @@ import {
   normalizeMessages,
   requireOwnerId
 } from "@/lib/api-guards";
+import { resolveRequestOwnerId } from "@/lib/server-data";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -117,7 +118,7 @@ export async function POST(req: Request) {
       chatId = null
     } = body;
 
-    const ownerId = requireOwnerId(userId, guestId);
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
     const normalizedMessages = normalizeMessages(messages) as ChatMessage[];
 
     enforceMemoryRateLimit({

@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getFriendlyApiError } from "@/lib/api-guards";
+import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { id, title, userId = null, guestId = null } = body;
-
-    const ownerId = userId || guestId;
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     if (!id || !title || !ownerId) {
       return NextResponse.json(
@@ -20,7 +15,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { data: chat, error: chatError } = await supabase
+    const { data: chat, error: chatError } = await supabaseAdmin
       .from("chats")
       .select("id, user_id")
       .eq("id", id)
@@ -40,7 +35,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("chats")
       .update({ title: String(title).slice(0, 100) })
       .eq("id", id)
@@ -55,12 +50,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to rename chat."
-      },
-      { status: 500 }
-    );
+    const friendly = getFriendlyApiError(error, "Failed to rename chat.");
+    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
   }
 }

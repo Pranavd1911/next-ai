@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getFriendlyApiError } from "@/lib/api-guards";
+import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { userId = null, guestId = null } = body;
-
-    const ownerId = userId || guestId;
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     if (!ownerId) {
       return NextResponse.json(
@@ -20,7 +15,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { data: chats, error: chatsError } = await supabase
+    const { data: chats, error: chatsError } = await supabaseAdmin
       .from("chats")
       .select("id")
       .eq("user_id", ownerId);
@@ -38,7 +33,7 @@ export async function POST(req: Request) {
 
     const chatIds = chats.map((chat) => chat.id);
 
-    const { error: messagesError } = await supabase
+    const { error: messagesError } = await supabaseAdmin
       .from("messages")
       .delete()
       .in("chat_id", chatIds);
@@ -50,7 +45,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { error: deleteChatsError } = await supabase
+    const { error: deleteChatsError } = await supabaseAdmin
       .from("chats")
       .delete()
       .eq("user_id", ownerId);
@@ -67,12 +62,7 @@ export async function POST(req: Request) {
       deleted: chatIds.length
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to clear chats."
-      },
-      { status: 500 }
-    );
+    const friendly = getFriendlyApiError(error, "Failed to clear chats.");
+    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
   }
 }

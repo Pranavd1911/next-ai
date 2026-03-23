@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getFriendlyApiError } from "@/lib/api-guards";
+import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
 
 export async function GET(req: Request) {
   try {
@@ -12,8 +8,7 @@ export async function GET(req: Request) {
     const chatId = searchParams.get("chatId");
     const userId = searchParams.get("userId");
     const guestId = searchParams.get("guestId");
-
-    const ownerId = userId || guestId;
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     if (!chatId || !ownerId) {
       return NextResponse.json(
@@ -22,7 +17,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data: chat, error: chatError } = await supabase
+    const { data: chat, error: chatError } = await supabaseAdmin
       .from("chats")
       .select("id, user_id")
       .eq("id", chatId)
@@ -42,7 +37,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("messages")
       .select("role, content, metadata, created_at")
       .eq("chat_id", chatId)
@@ -57,12 +52,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json(data || []);
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to load messages."
-      },
-      { status: 500 }
-    );
+    const friendly = getFriendlyApiError(error, "Failed to load messages.");
+    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
   }
 }

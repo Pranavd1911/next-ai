@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
-import { getFriendlyApiError, requireOwnerId } from "@/lib/api-guards";
-import { supabaseAdmin, trackAnalyticsEvent } from "@/lib/server-data";
+import { getFriendlyApiError } from "@/lib/api-guards";
+import { resolveRequestOwnerId, supabaseAdmin, trackAnalyticsEvent } from "@/lib/server-data";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const ownerId = requireOwnerId(body.userId, body.guestId);
+    const ownerId = await resolveRequestOwnerId(req, {
+      userId: body.userId,
+      guestId: body.guestId
+    });
     const chatId = typeof body.chatId === "string" ? body.chatId : "";
 
     if (!chatId) {

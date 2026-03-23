@@ -156,3 +156,45 @@ export async function trackAnalyticsEvent(params: {
     metadata: params.metadata || {}
   });
 }
+
+function getBearerToken(req: Request) {
+  const header = req.headers.get("authorization") || "";
+  if (!header.toLowerCase().startsWith("bearer ")) return null;
+  return header.slice(7).trim() || null;
+}
+
+export async function resolveRequestOwnerId(
+  req: Request,
+  params: { userId?: string | null; guestId?: string | null }
+) {
+  const userId = params.userId || null;
+  const guestId = params.guestId || null;
+
+  if (userId) {
+    const token = getBearerToken(req);
+    if (!token) {
+      throw new ApiValidationError("Authentication required.", 401);
+    }
+
+    const {
+      data: { user },
+      error
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (error || !user) {
+      throw new ApiValidationError("Invalid session.", 401);
+    }
+
+    if (user.id !== userId) {
+      throw new ApiValidationError("Authenticated user mismatch.", 403);
+    }
+
+    return user.id;
+  }
+
+  if (guestId) {
+    return guestId;
+  }
+
+  throw new ApiValidationError("Missing userId or guestId.", 400);
+}

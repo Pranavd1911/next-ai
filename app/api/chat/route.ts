@@ -16,6 +16,7 @@ import {
   createMemoryItem,
   enforceDistributedRateLimit,
   getUserPreferences,
+  resolveRequestOwnerId,
   trackAnalyticsEvent
 } from "@/lib/server-data";
 
@@ -575,7 +576,7 @@ export async function POST(req: Request) {
       fullVoiceMode = false
     } = body;
 
-    const ownerId = requireOwnerId(userId, guestId);
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
     const normalizedMessages = normalizeMessages(messages) as ChatMessage[];
     const validatedMode = validateMode(mode);
     const validatedModel = validateModel(model);

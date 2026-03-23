@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabaseBrowser } from "@/lib/supabase-browser";
+import { getAuthHeaders, supabaseBrowser } from "@/lib/supabase-browser";
 
 type AnalyticsData = {
   dailyUsers: number;
@@ -30,7 +30,10 @@ export default function SettingsPage() {
         if (user?.id) {
           const preferencesRes = await fetch(
             `/api/preferences?${new URLSearchParams({ userId: user.id }).toString()}`,
-            { cache: "no-store" }
+            {
+              cache: "no-store",
+              headers: await getAuthHeaders()
+            }
           );
           const preferencesData = await preferencesRes.json();
           if (preferencesRes.ok) {
@@ -38,7 +41,13 @@ export default function SettingsPage() {
           }
         }
 
-        const analyticsRes = await fetch("/api/analytics", { cache: "no-store" });
+        const analyticsRes = await fetch(
+          `/api/analytics?${new URLSearchParams({ userId: user?.id || "" }).toString()}`,
+          {
+            cache: "no-store",
+            headers: await getAuthHeaders()
+          }
+        );
         const analyticsData = await analyticsRes.json();
         if (analyticsRes.ok) {
           setAnalytics(analyticsData);
@@ -64,7 +73,10 @@ export default function SettingsPage() {
   async function handleLogout() {
     try {
       await supabaseBrowser.auth.signOut();
-      await fetch("/api/logout", { method: "POST" });
+      await fetch("/api/logout", {
+        method: "POST",
+        headers: await getAuthHeaders()
+      });
       window.location.href = "/";
     } catch {
       alert("Logout failed");
@@ -80,7 +92,8 @@ export default function SettingsPage() {
     });
 
     const res = await fetch(`/api/preferences?${params.toString()}`, {
-      method: "DELETE"
+      method: "DELETE",
+      headers: await getAuthHeaders()
     });
     const data = await res.json();
     if (res.ok) {

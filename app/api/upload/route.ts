@@ -3,9 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import {
   MAX_OCR_IMAGES,
   getFriendlyApiError,
-  requireOwnerId,
   validateFile
 } from "@/lib/api-guards";
+import { resolveRequestOwnerId } from "@/lib/server-data";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -23,7 +23,15 @@ async function extractEmbeddedText(file: File, buffer: Buffer) {
   try {
     if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
       const pdfParseModule = await import("pdf-parse");
-      const pdfParse = (pdfParseModule as any).default || pdfParseModule;
+      const pdfParse =
+        (pdfParseModule as any).default ||
+        (pdfParseModule as any).pdfParse ||
+        pdfParseModule;
+
+      if (typeof pdfParse !== "function") {
+        throw new Error("pdf-parse did not export a callable parser.");
+      }
+
       const result = await pdfParse(buffer);
       return (result?.text || "").trim();
     }
@@ -113,7 +121,7 @@ export async function POST(req: Request) {
     const guestId = (formData.get("guestId") as string) || null;
     let chatId = (formData.get("chatId") as string) || null;
 
-    const ownerId = requireOwnerId(userId, guestId);
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     if (!file) {
       return NextResponse.json(

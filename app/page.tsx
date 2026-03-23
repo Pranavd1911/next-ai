@@ -10,7 +10,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import { getGuestId } from "@/lib/guest";
-import { supabaseBrowser } from "@/lib/supabase-browser";
+import { getAuthHeaders, supabaseBrowser } from "@/lib/supabase-browser";
 import {
   loadCachedMessages,
   removeCachedMessages,
@@ -377,6 +377,20 @@ export default function Home() {
     }, 3500);
   }
 
+  async function apiFetch(input: string, init: RequestInit = {}) {
+    const authHeaders = await getAuthHeaders();
+    const headers = new Headers(init.headers);
+
+    for (const [key, value] of Object.entries(authHeaders)) {
+      headers.set(key, value);
+    }
+
+    return fetch(input, {
+      ...init,
+      headers
+    });
+  }
+
   function getFriendlyClientError(message: string) {
     const lower = message.toLowerCase();
 
@@ -705,7 +719,7 @@ export default function Home() {
 
   async function migrateGuestChats(currentGuestId: string, currentUserId: string) {
     try {
-      await fetch("/api/migrate-guest", {
+      await apiFetch("/api/migrate-guest", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -727,7 +741,7 @@ export default function Home() {
     else return;
 
     try {
-      const res = await fetch(`/api/preferences?${params.toString()}`, {
+      const res = await apiFetch(`/api/preferences?${params.toString()}`, {
         cache: "no-store"
       });
       const data = await res.json();
@@ -751,7 +765,7 @@ export default function Home() {
       next?.prefersDirectAnswers ?? prefersDirectAnswers;
 
     try {
-      await fetch("/api/preferences", {
+      await apiFetch("/api/preferences", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -777,7 +791,7 @@ export default function Home() {
       return;
     }
 
-    const res = await fetch(`/api/history?${params.toString()}`, {
+    const res = await apiFetch(`/api/history?${params.toString()}`, {
       cache: "no-store"
     });
     const data = await res.json();
@@ -792,7 +806,7 @@ export default function Home() {
       if (userId) params.set("userId", userId);
       else if (guestId) params.set("guestId", guestId);
 
-      const res = await fetch(`/api/chat-messages?${params.toString()}`, {
+      const res = await apiFetch(`/api/chat-messages?${params.toString()}`, {
         cache: "no-store"
       });
       const data = await res.json();
@@ -1363,7 +1377,7 @@ export default function Home() {
   async function handleLogout() {
     try {
       await supabaseBrowser.auth.signOut();
-      await fetch("/api/logout", { method: "POST" });
+      await apiFetch("/api/logout", { method: "POST" });
       setShowProfileMenu(false);
       window.location.href = "/";
     } catch {
@@ -1550,7 +1564,7 @@ export default function Home() {
         });
       }
 
-      const res = await fetch("/api/upload", {
+      const res = await apiFetch("/api/upload", {
         method: "POST",
         body: formData
       });
@@ -1655,7 +1669,7 @@ export default function Home() {
       abortControllerRef.current = controller;
 
       if (resolvedRoute === "image") {
-        const imageRes = await fetch("/api/image", {
+        const imageRes = await apiFetch("/api/image", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
@@ -1710,7 +1724,7 @@ export default function Home() {
         return;
       }
 
-      const res = await fetch("/api/chat", {
+      const res = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
@@ -1838,7 +1852,7 @@ export default function Home() {
     if (userId) params.set("userId", userId);
     else if (guestId) params.set("guestId", guestId);
 
-    await fetch(`/api/delete?${params.toString()}`, { method: "DELETE" });
+    await apiFetch(`/api/delete?${params.toString()}`, { method: "DELETE" });
 
     if (activeChatIdRef.current === id) {
       setActiveChatId(null);
@@ -1860,7 +1874,7 @@ export default function Home() {
 
     try {
       const previousChatId = activeChatIdRef.current;
-      const res = await fetch("/api/clear-all", {
+      const res = await apiFetch("/api/clear-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, guestId })
@@ -1889,7 +1903,7 @@ export default function Home() {
     const newTitle = window.prompt("Rename chat", currentTitle || "New Chat");
     if (!newTitle?.trim()) return;
 
-    await fetch("/api/rename", {
+    await apiFetch("/api/rename", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1929,7 +1943,7 @@ export default function Home() {
     }
 
     try {
-      const res = await fetch("/api/share", {
+      const res = await apiFetch("/api/share", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

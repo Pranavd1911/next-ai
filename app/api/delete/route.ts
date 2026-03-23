@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getFriendlyApiError } from "@/lib/api-guards";
+import { resolveRequestOwnerId, supabaseAdmin } from "@/lib/server-data";
 
 export async function DELETE(req: Request) {
   try {
@@ -12,8 +8,7 @@ export async function DELETE(req: Request) {
     const id = searchParams.get("id");
     const userId = searchParams.get("userId");
     const guestId = searchParams.get("guestId");
-
-    const ownerId = userId || guestId;
+    const ownerId = await resolveRequestOwnerId(req, { userId, guestId });
 
     if (!id || !ownerId) {
       return NextResponse.json(
@@ -22,7 +17,7 @@ export async function DELETE(req: Request) {
       );
     }
 
-    const { data: chat, error: chatError } = await supabase
+    const { data: chat, error: chatError } = await supabaseAdmin
       .from("chats")
       .select("id, user_id")
       .eq("id", id)
@@ -42,7 +37,7 @@ export async function DELETE(req: Request) {
       );
     }
 
-    const { error: messagesError } = await supabase
+    const { error: messagesError } = await supabaseAdmin
       .from("messages")
       .delete()
       .eq("chat_id", id);
@@ -54,7 +49,7 @@ export async function DELETE(req: Request) {
       );
     }
 
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from("chats")
       .delete()
       .eq("id", id)
@@ -69,12 +64,7 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to delete chat."
-      },
-      { status: 500 }
-    );
+    const friendly = getFriendlyApiError(error, "Failed to delete chat.");
+    return NextResponse.json({ error: friendly.message }, { status: friendly.status });
   }
 }
