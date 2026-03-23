@@ -10,6 +10,8 @@ import { resolveRequestOwnerId } from "@/lib/server-data";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const openaiKey = process.env.OPENAI_API_KEY!;
+const OCR_EARLY_EXIT_TEXT_LENGTH = 1200;
+const EMBEDDED_TEXT_SUFFICIENT_LENGTH = 500;
 
 const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
@@ -97,7 +99,7 @@ async function runVisionOcr(imageDataUrl: string) {
                 type: "image_url",
                 image_url: {
                   url: imageDataUrl,
-                  detail: "high"
+                  detail: "low"
                 }
               }
             ]
@@ -234,14 +236,22 @@ export async function POST(req: Request) {
     let extractedText = await extractEmbeddedText(file, buffer);
     let extractionStatus = "";
 
-    if (extractedText.trim()) {
+    if (extractedText.trim().length >= EMBEDDED_TEXT_SUFFICIENT_LENGTH) {
       extractionStatus = "TEXT_EXTRACTED";
     } else if (ocrImages.length > 0) {
-      let combinedText = "";
+      let combinedText = extractedText.trim();
 
       for (const img of ocrImages) {
         const pageText = await runVisionOcr(img);
-        combinedText += "\n\n" + pageText;
+        if (pageText.trim()) {
+          combinedText = [combinedText, pageText.trim()]
+            .filter(Boolean)
+            .join("\n\n");
+        }
+
+        if (combinedText.length >= OCR_EARLY_EXIT_TEXT_LENGTH) {
+          break;
+        }
       }
 
       extractedText = combinedText.trim();

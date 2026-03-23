@@ -80,6 +80,9 @@ type VoiceLanguage =
   | "kn-IN"
   | "ja-JP";
 
+const PDF_OCR_RENDER_SCALE = 1.15;
+const PDF_OCR_MAX_PAGES = 1;
+
 function IconBase(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -1529,12 +1532,12 @@ export default function Home() {
         const loadingTask = (pdfjsLib as any).getDocument({ data: arrayBuffer });
         const pdf = await loadingTask.promise;
 
-        const maxPages = Math.min(pdf.numPages, 2);
+        const maxPages = Math.min(pdf.numPages, PDF_OCR_MAX_PAGES);
         const images: string[] = [];
 
         for (let i = 1; i <= maxPages; i++) {
           const page = await pdf.getPage(i);
-          const viewport = page.getViewport({ scale: 1.5 });
+          const viewport = page.getViewport({ scale: PDF_OCR_RENDER_SCALE });
 
           const canvas = document.createElement("canvas");
           const context = canvas.getContext("2d");
@@ -1549,7 +1552,7 @@ export default function Home() {
             viewport
           }).promise;
 
-          images.push(canvas.toDataURL("image/png"));
+          images.push(canvas.toDataURL("image/jpeg", 0.72));
         }
 
         return images;
