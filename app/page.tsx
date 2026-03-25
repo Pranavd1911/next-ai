@@ -395,6 +395,7 @@ export default function Home() {
       ) || null
     );
   }, [personalWorkspace]);
+  const latestWorkspace = activeGoalWorkspace || personalWorkspace.workspaces[0] || null;
   const activeGoalProgress = computeProgress(activeGoalWorkspace);
   const tasksRemaining = activeGoalWorkspace
     ? activeGoalWorkspace.tasks.filter((task) => !task.completed).length
@@ -2466,7 +2467,7 @@ export default function Home() {
     }));
   }
 
-  function selectGoal(goalId: GoalId) {
+  async function selectGoal(goalId: GoalId) {
     const usage = getDailyGoalUsage(personalWorkspace);
     if (
       personalWorkspace.preferences.pricingPlan === "free" &&
@@ -2480,27 +2481,71 @@ export default function Home() {
       return;
     }
 
+    const starterAnswers: Record<string, string> = {
+      pm_internship: "Student targeting PM internship",
+      startup: "Founder validating a startup idea",
+      make_money: "User wants the fastest income path",
+      improve_health: "User wants habits that stick"
+    } as Record<GoalId, string>;
+    const workspace = createWorkspace(goalId, {
+      context: starterAnswers[goalId]
+    });
+    const instantNextAction =
+      goalId === "pm_internship"
+        ? "Apply to Microsoft PM Internship"
+        : workspace.nextAction;
+    const instantWorkspace = {
+      ...workspace,
+      nextAction: instantNextAction
+    };
+    const memorySnippet = [
+      `Current goal: ${instantWorkspace.goalLabel}`,
+      `Pending actions: ${instantWorkspace.tasks.filter((task) => !task.completed).length}`,
+      `Next action: ${instantWorkspace.nextAction}`
+    ]
+      .join("\n")
+      .slice(0, 2000);
+
     setSelectedGoalId(goalId);
     setGoalAnswers({});
     setGoalAnswerDraft("");
     setGoalQuestionIndex(0);
+    setRememberedMemory(memorySnippet);
+    await savePreferences({ memory: memorySnippet });
     void recordAnalyticsEvent("goal_selected", {
       goalId,
       pricingPlan: personalWorkspace.preferences.pricingPlan
     });
-    updateWorkspace((current) => ({
-      ...current,
-      activeGoalId: goalId,
-      analytics: {
-        ...current.analytics,
-        goalClicks: {
-          ...current.analytics.goalClicks,
-          [goalId]: (current.analytics.goalClicks[goalId] || 0) + 1
+    updateWorkspace((current) => {
+      const nextUsage = getDailyGoalUsage(current);
+      return {
+        ...current,
+        activeGoalId: goalId,
+        workspaces: [
+          instantWorkspace,
+          ...current.workspaces.filter((item) => item.goalId !== goalId)
+        ].slice(0, 8),
+        usage: {
+          ...nextUsage,
+          goalsCreated: nextUsage.goalsCreated + 1
         },
-        lastDropOffPoint: "goal_selected"
-      },
-      updatedAt: new Date().toISOString()
-    }));
+        analytics: {
+          ...current.analytics,
+          goalClicks: {
+            ...current.analytics.goalClicks,
+            [goalId]: (current.analytics.goalClicks[goalId] || 0) + 1
+          },
+          lastDropOffPoint: "goal_selected"
+        },
+        updatedAt: new Date().toISOString()
+      };
+    });
+    await recordAnalyticsEvent("goal_dashboard_generated", {
+      goalId,
+      instant: true
+    });
+    showToast("Here’s your work done: resume, companies, and email template are ready.", "success");
+    setSelectedGoalId(null);
   }
 
   async function completeGoalIntake() {
@@ -3131,6 +3176,10 @@ export default function Home() {
           🎯 Your Plan Is Ready
         </div>
 
+        <div style={{ marginBottom: 12, color: "#d7e7f7", fontWeight: 700 }}>
+          You have {workspace.tasks.filter((task) => !task.completed).length} pending actions.
+        </div>
+
         <div
           style={{
             marginBottom: 16,
@@ -3141,7 +3190,7 @@ export default function Home() {
         >
           {[
             "✔ Resume generated",
-            workspace.goalId === "pm_internship" ? "✔ 25 companies found" : "✔ Action list generated",
+            workspace.goalId === "pm_internship" ? "✔ 20 companies found" : "✔ Action list generated",
             "✔ Email templates ready"
           ].map((item) => (
             <div
@@ -4207,19 +4256,19 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
               Dashboard
             </div>
             <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>
-              {activeGoalWorkspace?.goalLabel || "Your first goal starts here"}
+              {latestWorkspace?.goalLabel || "Your first goal starts here"}
             </div>
             <div style={{ fontSize: 13, color: "#9cb0c8", lineHeight: 1.6 }}>
-              {activeGoalWorkspace
-                ? `${activeGoalProgress}% progress • ${tasksRemaining} tasks remaining`
+              {latestWorkspace
+                ? `You have ${latestWorkspace.tasks.filter((task) => !task.completed).length} pending actions`
                 : "Resume drafted • 10 applications sent • Next action ready."}
             </div>
-            {activeGoalWorkspace ? (
+            {latestWorkspace ? (
               <button
                 style={{ ...smallButtonStyle, marginTop: 10 }}
-                onClick={() => setSelectedGoalId(activeGoalWorkspace.goalId)}
+                onClick={() => updateWorkspace((current) => ({ ...current, activeGoalId: latestWorkspace.goalId, updatedAt: new Date().toISOString() }))}
               >
-                View goal
+                Continue today
               </button>
             ) : (
               <button

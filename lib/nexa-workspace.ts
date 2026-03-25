@@ -474,11 +474,11 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
         },
         {
           id: "companies-card",
-          title: "25 Companies",
+          title: "20 Companies",
           kind: "strategy",
           cta: "Download",
           content:
-            "Microsoft\nGoogle\nAmazon\nMeta\nAdobe\nAtlassian\nNotion\nStripe\nFigma\nCanva\nRazorpay\nCRED\nMeesho\nSwiggy\nZepto\nBlinkit\nPhonePe\nGroww\nFreshworks\nHubSpot\nMiro\nCoursera\nCoinbase\nUber\nAirbnb"
+            "Microsoft\nGoogle\nAmazon\nMeta\nAdobe\nAtlassian\nNotion\nStripe\nFigma\nCanva\nRazorpay\nCRED\nMeesho\nSwiggy\nZepto\nBlinkit\nPhonePe\nGroww\nFreshworks\nHubSpot"
         },
         {
           id: "email-card",
