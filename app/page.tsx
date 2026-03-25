@@ -2482,17 +2482,17 @@ export default function Home() {
     }
 
     const starterAnswers: Record<string, string> = {
-      pm_internship: "Student targeting PM internship",
-      startup: "Founder validating a startup idea",
+      career: "User wants to get hired faster",
+      build: "User wants to turn an idea into something real",
       make_money: "User wants the fastest income path",
-      improve_health: "User wants habits that stick"
+      improve_self: "User wants habits that actually stick"
     } as Record<GoalId, string>;
     const workspace = createWorkspace(goalId, {
       context: starterAnswers[goalId]
     });
     const instantNextAction =
-      goalId === "pm_internship"
-        ? "Apply to Microsoft PM Internship"
+      goalId === "career"
+        ? "Apply to Microsoft Strategy & Operations Internship"
         : workspace.nextAction;
     const instantWorkspace = {
       ...workspace,
@@ -2854,7 +2854,7 @@ export default function Home() {
             kind: "resume",
             cta: "Download",
             content:
-              "Resume generated\n\n- Product-minded operator with analytical rigor\n- Built structured case stories around user pain points and prioritization\n- Ready for PM intern and Product Analyst application tracks"
+              "Resume generated\n\n- Role-specific positioning\n- Strong proof of execution and measurable results\n- Ready to send for your target role"
           },
           {
             id: "instant-email",
@@ -2862,7 +2862,7 @@ export default function Home() {
             kind: "message",
             cta: "Copy",
             content:
-              "Hi [Name], I’m targeting PM internships and noticed your path into product. I’ve prepared my resume and case stories and would value 10 minutes of advice on how to stand out."
+              "Hi [Name], I’m targeting roles in this area and noticed your path. I’ve prepared my resume and proof of work and would value 10 minutes of advice on how to stand out."
           },
           {
             id: "instant-plan",
@@ -2890,8 +2890,8 @@ export default function Home() {
                   ...workspace,
                   outputs: instantOutputs,
                   nextAction:
-                    workspace.goalId === "pm_internship"
-                      ? "Apply to Microsoft PM Intern role"
+                    workspace.goalId === "career"
+                      ? "Apply to Microsoft Strategy & Operations Internship"
                       : workspace.nextAction
                 }
               : workspace
@@ -2926,19 +2926,19 @@ export default function Home() {
           Your first goal starts here
         </div>
         <div style={{ marginTop: 10, fontSize: 24, fontWeight: 700 }}>
-          Demo plan: Get a PM Internship
+          Demo plan: Career
         </div>
         <div style={{ marginTop: 12, color: "#c9d9eb" }}>Progress: 20%</div>
         <div style={{ marginTop: 12, whiteSpace: "pre-wrap", lineHeight: 1.8, color: "#dfe9f7" }}>
-          {"✔ Resume drafted\n✔ 10 applications sent\n⬜ Mock interviews pending"}
+          {"✔ Resume drafted\n✔ 10 applications sent\n⬜ Interview prep pending"}
         </div>
         <div style={{ marginTop: 14, color: "#84d9ff", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
           Next Action
         </div>
         <div style={{ marginTop: 8, fontSize: 18, fontWeight: 700 }}>
-          → Apply to Amazon PM role
+          → Apply to Amazon Operations role
         </div>
-        <button style={{ ...primaryButtonStyle, marginTop: 16 }} onClick={() => setSelectedGoalId("pm_internship")}>
+        <button style={{ ...primaryButtonStyle, marginTop: 16 }} onClick={() => void selectGoal("career")}>
           Start your own plan
         </button>
       </div>
@@ -2956,10 +2956,10 @@ export default function Home() {
 
   function renderGoalIntake() {
     const goalMeta: Record<GoalId, { icon: string; outcome: string }> = {
-      pm_internship: { icon: "💼", outcome: "Land interviews in 2-4 weeks" },
-      startup: { icon: "🚀", outcome: "Go from idea to launch" },
-      make_money: { icon: "💰", outcome: "Find your fastest income path" },
-      improve_health: { icon: "🧘", outcome: "Build habits that actually stick" }
+      career: { icon: "💼", outcome: "Get hired faster with a structured plan" },
+      build: { icon: "🚀", outcome: "Turn ideas into real products" },
+      make_money: { icon: "💰", outcome: "Find and execute income opportunities" },
+      improve_self: { icon: "🧠", outcome: "Build habits that actually stick" }
     };
 
     return (
@@ -2990,7 +2990,7 @@ export default function Home() {
               maxWidth: 860
             }}
           >
-            Turn your goals into results — in minutes, not months.
+            Stop thinking. Start doing. NEXA turns your goals into actions.
           </div>
           <div
             style={{
@@ -3037,16 +3037,16 @@ export default function Home() {
               See how it works
             </div>
             <div style={{ marginTop: 10, fontSize: 22, fontWeight: 700 }}>
-              Sample output: Goal: Get PM Internship
+              Sample output: Goal: Career
             </div>
             <div style={{ marginTop: 14, whiteSpace: "pre-wrap", lineHeight: 1.8, color: "#dfe9f7" }}>
-              {"Week 1:\n✔ Fix resume\n✔ Apply to 15 companies\n✔ Practice 5 case questions"}
+              {"Week 1:\n✔ Fix resume\n✔ Apply to 15 companies\n✔ Practice 2 interviews"}
             </div>
             <div style={{ marginTop: 14, color: "#84d9ff", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
               Next Action
             </div>
             <div style={{ marginTop: 8, fontSize: 18, fontWeight: 700 }}>
-              → Apply to Microsoft PM Intern role
+              → Apply to Microsoft Strategy & Operations Internship
             </div>
           </div>
 
@@ -3190,7 +3190,7 @@ export default function Home() {
         >
           {[
             "✔ Resume generated",
-            workspace.goalId === "pm_internship" ? "✔ 20 companies found" : "✔ Action list generated",
+            workspace.goalId === "career" ? "✔ 20 companies found" : "✔ Action list generated",
             "✔ Email templates ready"
           ].map((item) => (
             <div
@@ -3721,7 +3721,7 @@ export default function Home() {
           >
             <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Analytics</div>
             <div style={{ color: "#c9d9eb", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-              {`Most used goal clicks: PM ${personalWorkspace.analytics.goalClicks.pm_internship}, Startup ${personalWorkspace.analytics.goalClicks.startup}, Money ${personalWorkspace.analytics.goalClicks.make_money}, Health ${personalWorkspace.analytics.goalClicks.improve_health}
+              {`Most used goal clicks: Career ${personalWorkspace.analytics.goalClicks.career}, Build ${personalWorkspace.analytics.goalClicks.build}, Money ${personalWorkspace.analytics.goalClicks.make_money}, Self ${personalWorkspace.analytics.goalClicks.improve_self}
 Execute clicks: ${personalWorkspace.analytics.executeClicks}
 Share clicks: ${personalWorkspace.analytics.shareClicks}
 Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
@@ -4273,7 +4273,7 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
             ) : (
               <button
                 style={{ ...smallButtonStyle, marginTop: 10 }}
-                onClick={() => setSelectedGoalId("pm_internship")}
+                onClick={() => void selectGoal("career")}
               >
                 Start your own plan
               </button>

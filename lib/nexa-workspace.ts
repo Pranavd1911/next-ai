@@ -1,8 +1,8 @@
 export type GoalId =
-  | "pm_internship"
-  | "startup"
+  | "career"
+  | "build"
   | "make_money"
-  | "improve_health";
+  | "improve_self";
 
 export type GoalQuestion = {
   id: string;
@@ -93,74 +93,54 @@ export const GOAL_OPTIONS: Array<{
   accent: string;
 }> = [
   {
-    id: "pm_internship",
-    label: "Get a PM Internship",
-    blurb: "Positioning, applications, outreach, and interview prep.",
+    id: "career",
+    label: "Career",
+    blurb: "Get hired faster with a structured plan.",
     accent: "#46c2ff"
   },
   {
-    id: "startup",
-    label: "Start a Startup",
-    blurb: "Idea, validation, landing page, pricing, and launch.",
+    id: "build",
+    label: "Build something",
+    blurb: "Turn ideas into real products.",
     accent: "#73f0c6"
   },
   {
     id: "make_money",
-    label: "Make Money",
-    blurb: "Fast path to a focused income engine with measurable upside.",
+    label: "Make money",
+    blurb: "Find and execute income opportunities.",
     accent: "#f6c65b"
   },
   {
-    id: "improve_health",
-    label: "Improve Health",
-    blurb: "Simple habits, tracking, and accountability without overload.",
+    id: "improve_self",
+    label: "Improve yourself",
+    blurb: "Build habits that actually stick.",
     accent: "#ff8b8b"
   }
 ];
 
 const GOAL_QUESTIONS: Record<GoalId, GoalQuestion[]> = {
-  pm_internship: [
+  career: [
+    {
+      id: "role_target",
+      label: "What role are you targeting?",
+      placeholder: "Software, design, marketing, ops, product, consulting, etc."
+    },
     {
       id: "background",
-      label: "Background",
-      placeholder: "Degree, year, past internships, PM or tech experience"
-    },
-    {
-      id: "target_companies",
-      label: "Target Companies",
-      placeholder: "What companies or industries do you want to target?"
-    },
-    {
-      id: "timeline",
-      label: "Timeline",
-      placeholder: "When do you want the internship?"
-    },
-    {
-      id: "strength",
-      label: "Strongest Edge",
-      placeholder: "What can you credibly sell right now?"
+      label: "What experience do you already have?",
+      placeholder: "Projects, internships, freelance work, or strongest skills"
     }
   ],
-  startup: [
+  build: [
     {
       id: "idea_space",
       label: "Idea Space",
       placeholder: "Which market or problem space are you most interested in?"
     },
     {
-      id: "skills",
-      label: "Skills",
-      placeholder: "What can you build, sell, or operate yourself?"
-    },
-    {
       id: "time_budget",
       label: "Time Budget",
       placeholder: "How many hours per week can you commit?"
-    },
-    {
-      id: "goal",
-      label: "Outcome Goal",
-      placeholder: "Revenue, users, validation, or fundraising goal?"
     }
   ],
   make_money: [
@@ -176,35 +156,20 @@ const GOAL_QUESTIONS: Record<GoalId, GoalQuestion[]> = {
     },
     {
       id: "available_time",
-      label: "Available Time",
-      placeholder: "How much time can you allocate each week?"
-    },
-    {
-      id: "risk_tolerance",
-      label: "Risk Tolerance",
-      placeholder: "Low-risk freelancing, moderate hustle, or high-risk bets?"
+      label: "Time available",
+      placeholder: "How many hours each week can you put in?"
     }
   ],
-  improve_health: [
+  improve_self: [
     {
-      id: "primary_goal",
-      label: "Primary Goal",
-      placeholder: "Fat loss, muscle gain, stamina, sleep, or general health?"
+      id: "habit_goal",
+      label: "What do you want to improve?",
+      placeholder: "Health, consistency, fitness, learning, focus, discipline"
     },
     {
       id: "current_state",
-      label: "Current State",
-      placeholder: "What does your current routine look like?"
-    },
-    {
-      id: "constraints",
-      label: "Constraints",
-      placeholder: "Time, equipment, food, injuries, or travel constraints?"
-    },
-    {
-      id: "motivation",
-      label: "Why Now",
-      placeholder: "What makes this important right now?"
+      label: "What’s your current routine?",
+      placeholder: "What does a normal day or week look like right now?"
     }
   ]
 };
@@ -229,30 +194,30 @@ function createMilestone(label: string, target: string): GoalMilestone {
 
 function buildRoadmap(goalId: GoalId): RoadmapWeek[] {
   switch (goalId) {
-    case "pm_internship":
+    case "career":
       return [
         {
           title: "Week 1",
-          focus: "Sharpen positioning",
-          deliverables: ["Resume v1", "PM story bank", "20 target companies"]
+          focus: "Position for the target role",
+          deliverables: ["Resume draft", "20 target companies", "application tracker"]
         },
         {
           title: "Week 2",
-          focus: "Start targeted outreach",
-          deliverables: ["10 alumni outreaches", "5 cold emails", "LinkedIn refresh"]
+          focus: "Start applications and outreach",
+          deliverables: ["10 applications", "5 cold emails", "LinkedIn refresh"]
         },
         {
           title: "Week 3",
-          focus: "Build proof",
-          deliverables: ["Case study deck", "1 product teardown", "Interview notes"]
+          focus: "Build proof and interview stories",
+          deliverables: ["portfolio proof", "story bank", "interview notes"]
         },
         {
           title: "Week 4",
-          focus: "Application sprint",
-          deliverables: ["20 applications", "Referral follow-ups", "Mock interviews"]
+          focus: "Interview and follow-up sprint",
+          deliverables: ["follow-ups", "mock interviews", "offer pipeline"]
         }
       ];
-    case "startup":
+    case "build":
       return [
         {
           title: "Week 1",
@@ -298,7 +263,7 @@ function buildRoadmap(goalId: GoalId): RoadmapWeek[] {
           deliverables: ["Repeatable outreach", "Case study", "Revenue review"]
         }
       ];
-    case "improve_health":
+    case "improve_self":
       return [
         {
           title: "Week 1",
@@ -326,15 +291,15 @@ function buildRoadmap(goalId: GoalId): RoadmapWeek[] {
 
 function buildStepPlan(goalId: GoalId): string[] {
   switch (goalId) {
-    case "pm_internship":
+    case "career":
       return [
-        "Position around product sense, ownership, and analytical thinking.",
+        "Choose one role target and align your proof to it.",
         "Build one sharp resume with quantified outcomes.",
-        "Target Product Analyst and APM-adjacent roles first.",
-        "Run a high-quality outreach cadence to alumni and hiring teams.",
-        "Practice cases and storytelling until answers feel reusable."
+        "Apply consistently instead of browsing endlessly.",
+        "Use outreach to increase interview odds.",
+        "Practice interview stories until they feel reusable."
       ];
-    case "startup":
+    case "build":
       return [
         "Pick one painful problem in a market you can access quickly.",
         "Validate demand with calls before building.",
@@ -350,7 +315,7 @@ function buildStepPlan(goalId: GoalId): string[] {
         "Close a paid pilot and turn it into a case study.",
         "Double down on the best acquisition channel."
       ];
-    case "improve_health":
+    case "improve_self":
       return [
         "Set a single measurable target instead of vague improvement.",
         "Create repeatable meal and movement defaults.",
@@ -363,14 +328,14 @@ function buildStepPlan(goalId: GoalId): string[] {
 
 function buildRecommendation(goalId: GoalId, answers: Record<string, string>) {
   switch (goalId) {
-    case "pm_internship":
+    case "career":
       return {
         recommendation:
-          "You should target Product Analyst roles first.",
+          "You should narrow to one role target first.",
         reasoning:
-          "They are easier to break into than pure PM internships, still build product credibility, and give you stronger odds of interviews if your experience is early-stage."
+          "A focused application story makes your resume, outreach, and interview prep materially stronger than applying broadly without a clear narrative."
       };
-    case "startup":
+    case "build":
       return {
         recommendation:
           "You should start with a narrow B2B painkiller, not a broad consumer idea.",
@@ -384,26 +349,26 @@ function buildRecommendation(goalId: GoalId, answers: Record<string, string>) {
         reasoning:
           "Services create cash, proof, and customer insight fastest. That gives you leverage to productize later instead of guessing what people will pay for."
       };
-    case "improve_health":
+    case "improve_self":
       return {
         recommendation:
-          "You should optimize sleep and daily activity before adding a complex routine.",
+          "You should reduce friction before chasing intensity.",
         reasoning:
-          "Those two levers improve energy, recovery, and body composition fastest, and they make any training or nutrition plan easier to sustain."
+          "Simple daily habits stick longer, create visible progress, and make more advanced routines easier to sustain."
       };
   }
 }
 
 function buildTasks(goalId: GoalId): GoalTask[] {
   switch (goalId) {
-    case "pm_internship":
+    case "career":
       return [
-        createTask("Finalize one internship-ready resume", "Today"),
-        createTask("Shortlist 20 product or analyst roles", "This week"),
-        createTask("Send 10 targeted LinkedIn messages", "This week"),
-        createTask("Complete 2 mock PM interviews", "This week")
+        createTask("Finalize one role-specific resume", "Today"),
+        createTask("Shortlist 20 companies and roles", "This week"),
+        createTask("Send 10 targeted outreach messages", "This week"),
+        createTask("Complete 2 mock interviews", "This week")
       ];
-    case "startup":
+    case "build":
       return [
         createTask("Define one user segment and one painful workflow", "Today"),
         createTask("Book 10 validation calls", "This week"),
@@ -417,11 +382,11 @@ function buildTasks(goalId: GoalId): GoalTask[] {
         createTask("Send 20 outbound messages", "This week"),
         createTask("Close 1 paid pilot", "This week")
       ];
-    case "improve_health":
+    case "improve_self":
       return [
-        createTask("Set daily sleep and step targets", "Today"),
-        createTask("Plan 4 workouts for this week", "This week"),
-        createTask("Create 2 default healthy meals", "This week"),
+        createTask("Set one daily habit target", "Today"),
+        createTask("Plan your weekly routine", "This week"),
+        createTask("Create 2 low-friction defaults", "This week"),
         createTask("Log adherence for 7 days", "This week")
       ];
   }
@@ -429,13 +394,13 @@ function buildTasks(goalId: GoalId): GoalTask[] {
 
 function buildMilestones(goalId: GoalId): GoalMilestone[] {
   switch (goalId) {
-    case "pm_internship":
+    case "career":
       return [
         createMilestone("Interview-ready profile", "7 days"),
         createMilestone("50 targeted applications", "30 days"),
-        createMilestone("First PM internship offer", "90 days")
+        createMilestone("First offer in pipeline", "90 days")
       ];
-    case "startup":
+    case "build":
       return [
         createMilestone("10 validation conversations", "7 days"),
         createMilestone("First paying user", "30 days"),
@@ -447,7 +412,7 @@ function buildMilestones(goalId: GoalId): GoalMilestone[] {
         createMilestone("₹50k+ monthly revenue", "30-45 days"),
         createMilestone("Productized offer", "90 days")
       ];
-    case "improve_health":
+    case "improve_self":
       return [
         createMilestone("7-day consistency streak", "7 days"),
         createMilestone("Visible routine lock-in", "30 days"),
@@ -462,7 +427,7 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
     .join("\n");
 
   switch (goalId) {
-    case "pm_internship":
+    case "career":
       return [
         {
           id: "resume-card",
@@ -470,7 +435,7 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
           kind: "resume",
           cta: "Download",
           content:
-            `PRODUCT INTERNSHIP RESUME\n\nHeadline: Product-minded operator with analytical rigor.\n\nSummary:\n- Built product instincts through fast execution and structured problem solving\n- Comfortable with analytics, user research, and ownership\n- Ready for PM intern or Product Analyst internship tracks\n\nExperience bullets to use:\n- Improved a workflow by identifying user pain points and proposing product fixes\n- Ran structured analysis to prioritize features and measure outcomes\n- Worked cross-functionally and communicated decisions clearly\n\nContext:\n${answerSummary}`
+            `ROLE-SPECIFIC RESUME\n\nHeadline: Outcome-driven candidate with clear proof of execution.\n\nSummary:\n- Strong fit for the role you are targeting\n- Evidence of ownership, communication, and measurable impact\n- Resume tailored for faster hiring conversion\n\nExperience bullets to use:\n- Improved a workflow or outcome through structured execution\n- Shipped work with measurable results\n- Worked across functions and communicated decisions clearly\n\nContext:\n${answerSummary}`
         },
         {
           id: "companies-card",
@@ -486,7 +451,7 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
           kind: "message",
           cta: "Copy",
           content:
-            "Subject: Quick question from an aspiring PM intern\n\nHi [Name],\n\nI’m targeting PM and Product Analyst internships and have been building my product case stories around user problems, prioritization, and execution. I noticed your path into product and wanted to ask if you’d be open to a 10-minute chat or any advice on how to stand out for intern roles.\n\nThanks,\n[Your Name]"
+            "Subject: Quick question about breaking into this role\n\nHi [Name],\n\nI’m targeting roles in this area and have been building my proof around execution, problem solving, and measurable outcomes. I noticed your path and wanted to ask if you’d be open to a 10-minute chat or any advice on how to stand out.\n\nThanks,\n[Your Name]"
         },
         {
           id: "plan-card",
@@ -494,10 +459,10 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
           kind: "plan",
           cta: "Execute this",
           content:
-            "Week 1: finalize resume, shortlist 25 companies, send 10 emails, complete 5 mock case questions."
+            "Week 1: finalize resume, shortlist 20 companies, send 10 emails, and complete 2 mock interviews."
         }
       ];
-    case "startup":
+    case "build":
       return [
         {
           id: "plan-card",
@@ -567,7 +532,7 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
             "Track leads contacted, replies, calls booked, proposals sent, pilots closed, and revenue this week."
         }
       ];
-    case "improve_health":
+    case "improve_self":
       return [
         {
           id: "plan-card",
@@ -651,10 +616,10 @@ export function createEmptyWorkspace(): PersonalWorkspace {
     },
     analytics: {
       goalClicks: {
-        pm_internship: 0,
-        startup: 0,
+        career: 0,
+        build: 0,
         make_money: 0,
-        improve_health: 0
+        improve_self: 0
       },
       executeClicks: 0,
       shareClicks: 0,
