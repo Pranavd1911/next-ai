@@ -2673,6 +2673,25 @@ export default function Home() {
     }));
   }
 
+  function updateOutputContent(cardId: string, content: string) {
+    if (!activeGoalWorkspace) return;
+
+    updateWorkspace((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.goalId === activeGoalWorkspace.goalId
+          ? {
+              ...workspace,
+              outputs: workspace.outputs.map((card) =>
+                card.id === cardId ? { ...card, content } : card
+              )
+            }
+          : workspace
+      ),
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
   function downloadTextFile(filename: string, content: string) {
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -2789,28 +2808,32 @@ export default function Home() {
             title: "Resume",
             kind: "resume",
             cta: "Download",
-            content: `Instant ${activeGoalWorkspace.goalLabel} resume draft with quantified bullets and positioning.`
+            content:
+              "Resume generated\n\n- Product-minded operator with analytical rigor\n- Built structured case stories around user pain points and prioritization\n- Ready for PM intern and Product Analyst application tracks"
           },
           {
             id: "instant-email",
             title: "Cold Email",
             kind: "message",
             cta: "Copy",
-            content: `Fast outreach draft for ${activeGoalWorkspace.goalLabel} with a direct ask and strong hook.`
+            content:
+              "Hi [Name], I’m targeting PM internships and noticed your path into product. I’ve prepared my resume and case stories and would value 10 minutes of advice on how to stand out."
           },
           {
             id: "instant-plan",
             title: "Execution Plan",
             kind: "plan",
             cta: "Execute this",
-            content: `Aggressive 7-day sprint for ${activeGoalWorkspace.goalLabel} with daily tasks and one dominant next action.`
+            content:
+              "Today: finalize resume\nTomorrow: apply to 5 roles\nDay 3: send 10 cold emails\nDay 4: do 2 mock case questions\nDay 5: follow up on applications"
           },
           {
             id: "instant-companies",
             title: "Target Companies",
             kind: "strategy",
-            cta: "Edit",
-            content: `Curated company list and role targets for ${activeGoalWorkspace.goalLabel}.`
+            cta: "Download",
+            content:
+              "Microsoft\nGoogle\nAmazon\nMeta\nAdobe\nAtlassian\nNotion\nStripe\nRazorpay\nCRED\nMeesho\nSwiggy"
           }
         ];
 
@@ -3107,6 +3130,35 @@ export default function Home() {
         <div style={{ marginBottom: 14, fontSize: 12, color: "#84d9ff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
           🎯 Your Plan Is Ready
         </div>
+
+        <div
+          style={{
+            marginBottom: 16,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+            gap: 12
+          }}
+        >
+          {[
+            "✔ Resume generated",
+            workspace.goalId === "pm_internship" ? "✔ 25 companies found" : "✔ Action list generated",
+            "✔ Email templates ready"
+          ].map((item) => (
+            <div
+              key={item}
+              style={{
+                borderRadius: 18,
+                padding: "14px 16px",
+                background: "rgba(14,28,47,0.82)",
+                border: "1px solid rgba(115,240,198,0.18)",
+                fontWeight: 700
+              }}
+            >
+              {item}
+            </div>
+          ))}
+        </div>
+
         <div
           style={{
             display: "grid",
@@ -3282,6 +3334,34 @@ export default function Home() {
           ))}
         </div>
 
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          {[
+            { title: "Today's task", value: workspace.tasks.find((task) => !task.completed)?.title || workspace.nextAction },
+            { title: "You're 40% done", value: `${Math.max(activeGoalProgress, 40)}% done` },
+            { title: "Next step waiting", value: workspace.nextAction }
+          ].map((item) => (
+            <div
+              key={item.title}
+              style={{
+                borderRadius: 22,
+                padding: 16,
+                background: "rgba(10,20,35,0.82)",
+                border: "1px solid rgba(126,164,206,0.12)"
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#84d9ff", marginBottom: 8 }}>{item.title}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.45 }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+
         <div style={{ marginTop: 18 }}>
           <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
             Output Cards
@@ -3307,9 +3387,21 @@ export default function Home() {
                   <div style={{ fontSize: 20, fontWeight: 700 }}>{card.title}</div>
                   <span style={{ ...smallButtonStyle, cursor: "default" }}>{card.kind}</span>
                 </div>
-                <div style={{ whiteSpace: "pre-wrap", color: "#d3e0ef", lineHeight: 1.65, minHeight: 120 }}>
-                  {card.content}
-                </div>
+                <textarea
+                  value={card.content}
+                  onChange={(e) => updateOutputContent(card.id, e.target.value)}
+                  style={{
+                    width: "100%",
+                    minHeight: 160,
+                    borderRadius: 16,
+                    border: "1px solid rgba(126,164,206,0.12)",
+                    background: "rgba(255,255,255,0.03)",
+                    color: "#d3e0ef",
+                    lineHeight: 1.65,
+                    padding: 12,
+                    resize: "vertical"
+                  }}
+                />
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
                   <button style={smallButtonStyle} onClick={() => void handleOutputAction(card)}>
                     {card.cta}

@@ -465,36 +465,36 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
     case "pm_internship":
       return [
         {
-          id: "plan-card",
-          title: "Plan",
-          kind: "plan",
-          cta: "Execute this",
-          content:
-            "Sharpen your resume, focus on Product Analyst and APM-adjacent openings, then run referrals plus outreach in parallel."
-        },
-        {
           id: "resume-card",
           title: "Resume",
           kind: "resume",
           cta: "Download",
           content:
-            `Headline: Product-minded operator with analytical rigor.\nBullets: Quantify outcomes, emphasize ownership, and show product thinking.\nContext:\n${answerSummary}`
+            `PRODUCT INTERNSHIP RESUME\n\nHeadline: Product-minded operator with analytical rigor.\n\nSummary:\n- Built product instincts through fast execution and structured problem solving\n- Comfortable with analytics, user research, and ownership\n- Ready for PM intern or Product Analyst internship tracks\n\nExperience bullets to use:\n- Improved a workflow by identifying user pain points and proposing product fixes\n- Ran structured analysis to prioritize features and measure outcomes\n- Worked cross-functionally and communicated decisions clearly\n\nContext:\n${answerSummary}`
         },
         {
-          id: "message-card",
-          title: "LinkedIn Message",
+          id: "companies-card",
+          title: "25 Companies",
+          kind: "strategy",
+          cta: "Download",
+          content:
+            "Microsoft\nGoogle\nAmazon\nMeta\nAdobe\nAtlassian\nNotion\nStripe\nFigma\nCanva\nRazorpay\nCRED\nMeesho\nSwiggy\nZepto\nBlinkit\nPhonePe\nGroww\nFreshworks\nHubSpot\nMiro\nCoursera\nCoinbase\nUber\nAirbnb"
+        },
+        {
+          id: "email-card",
+          title: "Cold Email Template",
           kind: "message",
           cta: "Copy",
           content:
-            "Hi, I’m exploring PM and Product Analyst internships and liked your path into product. I’ve been building my product case stories and would value 10 minutes of advice."
+            "Subject: Quick question from an aspiring PM intern\n\nHi [Name],\n\nI’m targeting PM and Product Analyst internships and have been building my product case stories around user problems, prioritization, and execution. I noticed your path into product and wanted to ask if you’d be open to a 10-minute chat or any advice on how to stand out for intern roles.\n\nThanks,\n[Your Name]"
         },
         {
-          id: "strategy-card",
-          title: "Strategy",
-          kind: "strategy",
-          cta: "Edit",
+          id: "plan-card",
+          title: "Plan",
+          kind: "plan",
+          cta: "Execute this",
           content:
-            "Use a two-lane funnel: direct applications for volume and high-context outreach for conversion."
+            "Week 1: finalize resume, shortlist 25 companies, send 10 emails, complete 5 mock case questions."
         }
       ];
     case "startup":
