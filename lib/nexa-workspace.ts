@@ -438,12 +438,12 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
             `ROLE-SPECIFIC RESUME\n\nHeadline: Outcome-driven candidate with clear proof of execution.\n\nSummary:\n- Strong fit for the role you are targeting\n- Evidence of ownership, communication, and measurable impact\n- Resume tailored for faster hiring conversion\n\nExperience bullets to use:\n- Improved a workflow or outcome through structured execution\n- Shipped work with measurable results\n- Worked across functions and communicated decisions clearly\n\nContext:\n${answerSummary}`
         },
         {
-          id: "companies-card",
-          title: "20 Companies",
+          id: "job-links-card",
+          title: "Job Links",
           kind: "strategy",
-          cta: "Download",
+          cta: "Open links",
           content:
-            "Microsoft\nGoogle\nAmazon\nMeta\nAdobe\nAtlassian\nNotion\nStripe\nFigma\nCanva\nRazorpay\nCRED\nMeesho\nSwiggy\nZepto\nBlinkit\nPhonePe\nGroww\nFreshworks\nHubSpot"
+            "Microsoft Careers https://careers.microsoft.com/\nGoogle Careers https://careers.google.com/\nAmazon Jobs https://www.amazon.jobs/\nMeta Careers https://www.metacareers.com/\nAdobe Careers https://careers.adobe.com/\nAtlassian Careers https://www.atlassian.com/company/careers"
         },
         {
           id: "email-card",
@@ -465,24 +465,24 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
     case "build":
       return [
         {
-          id: "plan-card",
-          title: "Plan",
+          id: "landing-page-card",
+          title: "Landing Page Copy",
           kind: "plan",
-          cta: "Execute this",
+          cta: "Download",
           content:
-            "Move from idea to validation to landing page to pricing to launch without adding side quests."
+            `Headline: Stop wasting hours on this problem.\nSubheadline: A focused product that helps users fix it faster with less friction.\nCTA: Join the waitlist\nProof: Built for a painful workflow with clear ROI.\nContext:\n${answerSummary}`
         },
         {
-          id: "business-plan-card",
-          title: "Business Plan",
+          id: "pricing-card",
+          title: "Pricing Model",
           kind: "strategy",
           cta: "Download",
           content:
-            `Problem, ICP, solution wedge, pricing hypothesis, and launch plan.\nContext:\n${answerSummary}`
+            "Free: 1 core workflow\nStarter: $19/month for solo users\nTeam: $79/month for collaboration and analytics\nPilot: paid setup fee for concierge onboarding"
         },
         {
-          id: "roadmap-card",
-          title: "Launch Strategy",
+          id: "launch-card",
+          title: "Launch Plan",
           kind: "roadmap",
           cta: "Edit",
           content:
@@ -500,20 +500,20 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
     case "make_money":
       return [
         {
-          id: "plan-card",
-          title: "Plan",
+          id: "method-card",
+          title: "Exact Method",
           kind: "plan",
           cta: "Execute this",
           content:
-            "Package one service around an outcome, send targeted outbound, then convert the first client into repeatable proof."
+            "Offer a service tied to one painful business outcome, price it as a short pilot, and close the first customer through targeted outbound."
         },
         {
-          id: "offer-card",
-          title: "Strategy",
+          id: "first-step-card",
+          title: "First Step",
           kind: "strategy",
-          cta: "Edit",
+          cta: "Execute this",
           content:
-            `Offer: Solve one expensive problem fast.\nIdeal client: the buyer who already feels the pain.\nContext:\n${answerSummary}`
+            "Pick one customer type, write one offer sentence, and send 10 messages today."
         },
         {
           id: "email-card",
@@ -535,20 +535,20 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
     case "improve_self":
       return [
         {
-          id: "plan-card",
-          title: "Plan",
+          id: "habit-card",
+          title: "Habit System",
           kind: "plan",
           cta: "Execute this",
           content:
-            "Start with sleep, steps, and 4 consistent workouts. Only add complexity after adherence is stable."
+            "Choose one non-negotiable daily habit, attach it to an existing routine, and track it at the same time every day."
         },
         {
-          id: "routine-card",
-          title: "Strategy",
+          id: "tracker-card",
+          title: "Daily Tracker",
           kind: "strategy",
-          cta: "Edit",
+          cta: "Download",
           content:
-            `Default routine: protect sleep window, hit daily movement target, and train on a fixed schedule.\nContext:\n${answerSummary}`
+            "Day, Habit done?, Energy, Notes\nMonday, , , \nTuesday, , , \nWednesday, , , \nThursday, , , \nFriday, , , \nSaturday, , , \nSunday, , , "
         },
         {
           id: "checklist-card",

@@ -315,6 +315,20 @@ function formatSourceLabel(source: { title: string; url: string }) {
   return `${hostname} · ${shortTitle}`;
 }
 
+function extractLinks(text: string) {
+  return text
+    .split("\n")
+    .map((line) => {
+      const match = line.match(/https?:\/\/\S+/);
+      if (!match) return null;
+      return {
+        label: line.replace(match[0], "").trim() || match[0],
+        url: match[0]
+      };
+    })
+    .filter(Boolean) as Array<{ label: string; url: string }>;
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -2749,6 +2763,7 @@ export default function Home() {
 
   async function handleOutputAction(card: OutputCard) {
     const action = card.cta.toLowerCase();
+    const links = extractLinks(card.content);
 
     trackWorkspaceUpdate((analytics) => ({
       ...analytics,
@@ -2764,6 +2779,18 @@ export default function Home() {
         action: "copy"
       });
       showToast(`${card.title} copied to clipboard.`, "success");
+      return;
+    }
+
+    if (action.includes("open") && links.length > 0) {
+      for (const link of links.slice(0, 3)) {
+        window.open(link.url, "_blank", "noopener,noreferrer");
+      }
+      await recordAnalyticsEvent("output_action", {
+        cardId: card.id,
+        action: "open_links"
+      });
+      showToast(`${card.title} opened.`, "success");
       return;
     }
 
@@ -3451,6 +3478,21 @@ export default function Home() {
                     resize: "vertical"
                   }}
                 />
+                {extractLinks(card.content).length > 0 && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+                    {extractLinks(card.content).map((link) => (
+                      <a
+                        key={link.url}
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ ...smallButtonStyle, textDecoration: "none" }}
+                      >
+                        {link.label}
+                      </a>
+                    ))}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
                   <button style={smallButtonStyle} onClick={() => void handleOutputAction(card)}>
                     {card.cta}
@@ -4253,7 +4295,7 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
             }}
           >
             <div style={{ fontSize: 12, color: "#84d9ff", marginBottom: 8 }}>
-              Dashboard
+              Daily System
             </div>
             <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>
               {latestWorkspace?.goalLabel || "Your first goal starts here"}
@@ -4263,6 +4305,11 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
                 ? `You have ${latestWorkspace.tasks.filter((task) => !task.completed).length} pending actions`
                 : "Resume drafted • 10 applications sent • Next action ready."}
             </div>
+            {latestWorkspace && (
+              <div style={{ marginTop: 10, fontSize: 12, color: "#c9d9eb", lineHeight: 1.6 }}>
+                {`Progress ${computeProgress(latestWorkspace)}% • Next step ${latestWorkspace.nextAction} • Streak ${personalWorkspace.momentum.streakDays} days`}
+              </div>
+            )}
             {latestWorkspace ? (
               <button
                 style={{ ...smallButtonStyle, marginTop: 10 }}
