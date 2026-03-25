@@ -258,6 +258,74 @@ button {
   color: #d8fff0;
 }
 
+.site-footer {
+  border-top: 1px solid var(--border);
+  background: rgba(5, 12, 22, 0.92);
+  backdrop-filter: blur(14px);
+}
+
+.site-footer-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 18px 20px 28px;
+  display: grid;
+  gap: 10px;
+}
+
+.site-footer-copy {
+  font-weight: 700;
+}
+
+.site-footer-links {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.site-footer-note {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 780px;
+}
+
+.legal-shell {
+  min-height: calc(100vh - 120px);
+  padding: 32px 20px 48px;
+}
+
+.legal-card {
+  max-width: 860px;
+  margin: 0 auto;
+  background: rgba(19, 26, 46, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 28px;
+}
+
+.legal-card h1 {
+  margin: 0 0 10px;
+  font-size: 40px;
+}
+
+.legal-card h2 {
+  margin-top: 24px;
+  margin-bottom: 10px;
+  font-size: 24px;
+}
+
+.legal-card p,
+.legal-card li {
+  color: var(--muted);
+  line-height: 1.75;
+}
+
+.legal-card ul {
+  padding-left: 20px;
+}
+
 .error {
   padding: 12px 14px;
   border-radius: 12px;
