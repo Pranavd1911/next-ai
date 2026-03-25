@@ -352,6 +352,7 @@ export default function Home() {
   const [goalAnswers, setGoalAnswers] = useState<Record<string, string>>({});
   const [goalAnswerDraft, setGoalAnswerDraft] = useState("");
   const [goalQuestionIndex, setGoalQuestionIndex] = useState(0);
+  const [showDoItModal, setShowDoItModal] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [codeModeEnabled, setCodeModeEnabled] = useState(false);
   const [prefersDirectAnswers, setPrefersDirectAnswers] = useState(true);
@@ -2759,7 +2760,62 @@ export default function Home() {
     toggleFullVoiceMode();
   }
 
+  function openDoItForMe(option?: string) {
+    if (option) {
+      setInput(
+        `Do it for me: ${option}\nCurrent goal: ${activeGoalWorkspace?.goalLabel || "My goal"}`
+      );
+      setShowDoItModal(false);
+      showToast(`${option} prepared instantly.`, "success");
+      void recordAnalyticsEvent("do_it_for_me_selected", { option });
+      return;
+    }
+
+    setShowDoItModal(true);
+  }
+
+  function renderDemoDashboard() {
+    return (
+      <div
+        style={{
+          marginTop: 18,
+          borderRadius: 24,
+          padding: 18,
+          background: "rgba(9,18,32,0.82)",
+          border: "1px solid rgba(126,164,206,0.12)"
+        }}
+      >
+        <div style={{ fontSize: 12, color: "#84d9ff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Your first goal starts here
+        </div>
+        <div style={{ marginTop: 10, fontSize: 24, fontWeight: 700 }}>
+          Demo plan: Get a PM Internship
+        </div>
+        <div style={{ marginTop: 12, color: "#c9d9eb" }}>Progress: 20%</div>
+        <div style={{ marginTop: 12, whiteSpace: "pre-wrap", lineHeight: 1.8, color: "#dfe9f7" }}>
+          {"✔ Resume drafted\n✔ 10 applications sent\n⬜ Mock interviews pending"}
+        </div>
+        <div style={{ marginTop: 14, color: "#84d9ff", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          Next Action
+        </div>
+        <div style={{ marginTop: 8, fontSize: 18, fontWeight: 700 }}>
+          → Apply to Amazon PM role
+        </div>
+        <button style={{ ...primaryButtonStyle, marginTop: 16 }} onClick={() => setSelectedGoalId("pm_internship")}>
+          Start your own plan
+        </button>
+      </div>
+    );
+  }
+
   function renderGoalIntake() {
+    const goalMeta: Record<GoalId, { icon: string; outcome: string }> = {
+      pm_internship: { icon: "💼", outcome: "Land interviews in 2-4 weeks" },
+      startup: { icon: "🚀", outcome: "Go from idea to launch" },
+      make_money: { icon: "💰", outcome: "Find your fastest income path" },
+      improve_health: { icon: "🧘", outcome: "Build habits that actually stick" }
+    };
+
     return (
       <div
         style={{
@@ -2780,15 +2836,15 @@ export default function Home() {
         >
           <div
             style={{
-              fontSize: isMobile ? 30 : 46,
+              fontSize: isMobile ? 34 : 54,
               fontWeight: 700,
               lineHeight: 1.04,
               letterSpacing: "-0.06em",
               fontFamily: "var(--font-display)",
-              maxWidth: 760
+              maxWidth: 860
             }}
           >
-            What do you want to achieve today?
+            Turn your goals into results — in minutes, not months.
           </div>
           <div
             style={{
@@ -2799,7 +2855,53 @@ export default function Home() {
               lineHeight: 1.7
             }}
           >
-            Pick one goal, answer a few smart questions, and get a structured execution dashboard instead of a chat thread.
+            NEXA builds your plan, tracks your progress, and executes tasks with you.
+          </div>
+
+          <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {[
+              "⚡ Get results in < 10 minutes",
+              "🎯 Built for students & founders",
+              "🚀 Execution, not just answers"
+            ].map((badge) => (
+              <div
+                key={badge}
+                style={{
+                  ...smallButtonStyle,
+                  cursor: "default",
+                  padding: "8px 12px",
+                  background: "rgba(14,28,47,0.86)"
+                }}
+              >
+                {badge}
+              </div>
+            ))}
+          </div>
+
+          <div
+            style={{
+              marginTop: 22,
+              borderRadius: 24,
+              padding: 20,
+              background: "rgba(7,15,27,0.78)",
+              border: "1px solid rgba(126,164,206,0.14)"
+            }}
+          >
+            <div style={{ fontSize: 12, color: "#84d9ff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              See how it works
+            </div>
+            <div style={{ marginTop: 10, fontSize: 22, fontWeight: 700 }}>
+              Sample output: Goal: Get PM Internship
+            </div>
+            <div style={{ marginTop: 14, whiteSpace: "pre-wrap", lineHeight: 1.8, color: "#dfe9f7" }}>
+              {"Week 1:\n✔ Fix resume\n✔ Apply to 15 companies\n✔ Practice 5 case questions"}
+            </div>
+            <div style={{ marginTop: 14, color: "#84d9ff", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Next Action
+            </div>
+            <div style={{ marginTop: 8, fontSize: 18, fontWeight: 700 }}>
+              → Apply to Microsoft PM Intern role
+            </div>
           </div>
 
           <div
@@ -2827,16 +2929,29 @@ export default function Home() {
                       ? "linear-gradient(135deg, rgba(23,45,72,0.96), rgba(13,26,45,0.98))"
                       : "rgba(11,22,38,0.75)",
                   color: "white",
-                  cursor: "pointer"
+                  cursor: "pointer",
+                  transition: "transform 160ms ease, box-shadow 160ms ease",
+                  boxShadow:
+                    selectedGoalId === goal.id
+                      ? "0 18px 36px rgba(6,14,24,0.28)"
+                      : "0 10px 24px rgba(2,8,16,0.16)"
                 }}
               >
                 <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
-                  {goal.label}
+                  {goalMeta[goal.id].icon} {goal.label}
                 </div>
-                <div style={{ color: "#9cb0c8", lineHeight: 1.6 }}>{goal.blurb}</div>
+                <div style={{ color: "#f4f7fb", lineHeight: 1.5, fontWeight: 600 }}>
+                  {goalMeta[goal.id].outcome}
+                </div>
+                <div style={{ color: "#9cb0c8", lineHeight: 1.6, marginTop: 8 }}>{goal.blurb}</div>
+                <div style={{ marginTop: 14, color: "#84d9ff", fontWeight: 700 }}>
+                  Start →
+                </div>
               </button>
             ))}
           </div>
+
+          {renderDemoDashboard()}
 
           {selectedGoalId && currentGoalQuestion && (
             <div
@@ -2943,6 +3058,9 @@ export default function Home() {
               <button style={primaryButtonStyle} onClick={() => setInput(`Execute this goal:\n${workspace.recommendation}`)}>
                 Execute this
               </button>
+              <button style={smallButtonStyle} onClick={() => openDoItForMe()}>
+                Do it for me
+              </button>
               <button style={smallButtonStyle} onClick={() => updateWorkspace((current) => ({ ...current, activeGoalId: null, updatedAt: new Date().toISOString() }))}>
                 Change goal
               </button>
@@ -2961,6 +3079,28 @@ export default function Home() {
               gap: 12
             }}
           >
+              <div
+                style={{
+                  padding: 16,
+                  borderRadius: 22,
+                  background: "rgba(10,20,35,0.82)",
+                  border: "1px solid rgba(126,164,206,0.12)"
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#84d9ff", marginBottom: 8 }}>Progress</div>
+                <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${activeGoalProgress}%`,
+                      height: "100%",
+                      background: "linear-gradient(90deg, #46c2ff, #73f0c6)"
+                    }}
+                  />
+                </div>
+                <div style={{ marginTop: 10, fontSize: 14, fontWeight: 700 }}>
+                  Goal: {workspace.goalLabel} • {activeGoalProgress}%
+                </div>
+              </div>
               {[
                 { label: "Progress %", value: `${activeGoalProgress}%` },
                 { label: "Tasks remaining", value: String(tasksRemaining) },
@@ -3109,7 +3249,7 @@ export default function Home() {
             <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Tasks Remaining</div>
             <div style={{ display: "grid", gap: 10 }}>
               {workspace.tasks.map((task) => (
-                <label
+                <div
                   key={task.id}
                   style={{
                     display: "flex",
@@ -3120,16 +3260,14 @@ export default function Home() {
                     background: "rgba(255,255,255,0.03)"
                   }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={task.completed}
-                    onChange={() => toggleTaskCompletion(task.id)}
-                  />
                   <span style={{ flex: 1, color: task.completed ? "#8fb3d6" : "white" }}>
                     {task.title}
                   </span>
                   <span style={{ color: "#84d9ff", fontSize: 12 }}>{task.dueLabel}</span>
-                </label>
+                  <button style={smallButtonStyle} onClick={() => toggleTaskCompletion(task.id)}>
+                    {task.completed ? "Done" : "Mark as done"}
+                  </button>
+                </div>
               ))}
             </div>
           </div>
@@ -3177,13 +3315,13 @@ export default function Home() {
           {[
             {
               title: "Free Plan",
-              body: "Limited goals/day\nBasic outputs",
+              body: "3 plans/day\nBasic outputs",
               action: () => setPricingPlan("free"),
               active: personalWorkspace.preferences.pricingPlan === "free"
             },
             {
               title: "Pro Plan",
-              body: "₹499-₹999/month\nUnlimited execution\nAdvanced templates\nFaster responses",
+              body: "Unlimited execution\nAdvanced templates\nFaster responses",
               action: () => setPricingPlan("pro"),
               active: personalWorkspace.preferences.pricingPlan === "pro"
             },
@@ -3223,8 +3361,23 @@ export default function Home() {
                   {`${usage.goalsCreated}/3 goals used today`}
                 </div>
               )}
+              {card.title === "Pro Plan" && (
+                <div style={{ marginTop: 12 }}>
+                  <span style={{ ...smallButtonStyle, background: "rgba(115,240,198,0.14)" }}>
+                    Unlimited execution
+                  </span>
+                </div>
+              )}
             </button>
           ))}
+        </div>
+
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ ...smallButtonStyle, cursor: "default" }}>Free → 3 plans/day</span>
+          <span style={{ ...smallButtonStyle, cursor: "default" }}>Pro → Unlimited execution</span>
+          <button style={primaryButtonStyle} onClick={() => setPricingPlan("pro")}>
+            Unlock Pro
+          </button>
         </div>
 
         <div
@@ -3296,6 +3449,39 @@ Share clicks: ${personalWorkspace.analytics.shareClicks}
 Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
             </div>
           </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          {[
+            "Got 3 interviews in 2 weeks",
+            "Best AI for productivity I've used",
+            "Instantly clearer than normal chatbots",
+            "Actually pushes me to execute"
+          ].map((quote) => (
+            <div
+              key={quote}
+              style={{
+                borderRadius: 22,
+                padding: 16,
+                background: "rgba(10,20,35,0.82)",
+                border: "1px solid rgba(126,164,206,0.12)"
+              }}
+            >
+              <div style={{ color: "#e8f1ff", lineHeight: 1.7 }}>{quote}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ ...smallButtonStyle, cursor: "default" }}>1,000+ plans generated</span>
+          <span style={{ ...smallButtonStyle, cursor: "default" }}>500+ users</span>
         </div>
       </div>
     );
@@ -3584,6 +3770,59 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
         />
       )}
 
+      {showDoItModal && (
+        <div
+          onClick={() => setShowDoItModal(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.58)",
+            zIndex: 90,
+            display: "grid",
+            placeItems: "center",
+            padding: 16
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 520,
+              borderRadius: 26,
+              padding: 22,
+              background: "linear-gradient(180deg, rgba(14,28,47,0.98), rgba(8,17,31,0.98))",
+              border: "1px solid rgba(126,164,206,0.14)"
+            }}
+          >
+            <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
+              What should I do for you?
+            </div>
+            <div style={{ color: "#a8bdd5", lineHeight: 1.7, marginBottom: 16 }}>
+              Pick one action and Nexa will generate it instantly.
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {["Build resume", "Write cold emails", "Find companies", "Create plan"].map((option) => (
+                <button
+                  key={option}
+                  style={{
+                    textAlign: "left",
+                    padding: "16px 18px",
+                    borderRadius: 18,
+                    border: "1px solid rgba(126,164,206,0.14)",
+                    background: "rgba(12,24,42,0.78)",
+                    color: "white",
+                    cursor: "pointer"
+                  }}
+                  onClick={() => openDoItForMe(option)}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {sidebarOpen && (
         <div style={sidebarStyle}>
           <button
@@ -3660,19 +3899,26 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
               Dashboard
             </div>
             <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>
-              {activeGoalWorkspace?.goalLabel || "No active goal"}
+              {activeGoalWorkspace?.goalLabel || "Your first goal starts here"}
             </div>
             <div style={{ fontSize: 13, color: "#9cb0c8", lineHeight: 1.6 }}>
               {activeGoalWorkspace
                 ? `${activeGoalProgress}% progress • ${tasksRemaining} tasks remaining`
-                : "Pick a goal to unlock the execution dashboard."}
+                : "Resume drafted • 10 applications sent • Next action ready."}
             </div>
-            {activeGoalWorkspace && (
+            {activeGoalWorkspace ? (
               <button
                 style={{ ...smallButtonStyle, marginTop: 10 }}
                 onClick={() => setSelectedGoalId(activeGoalWorkspace.goalId)}
               >
                 View goal
+              </button>
+            ) : (
+              <button
+                style={{ ...smallButtonStyle, marginTop: 10 }}
+                onClick={() => setSelectedGoalId("pm_internship")}
+              >
+                Start your own plan
               </button>
             )}
           </div>
@@ -3844,27 +4090,25 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
             >
               {activeGoalWorkspace ? `Nexa AI • ${activeGoalWorkspace.goalLabel}` : "Nexa AI"}
             </div>
-
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value as SelectedModel)}
-              style={{
-                background: "rgba(14,28,47,0.9)",
-                color: "white",
-                border: "1px solid rgba(126,164,206,0.16)",
-                borderRadius: 12,
-                padding: isMobile ? "8px 10px" : "8px 10px",
-                minWidth: isMobile ? 78 : 96,
-                maxWidth: isMobile ? 92 : 120,
-                flexShrink: 1,
-                fontSize: isMobile ? 13 : 14,
-                height: 40
-              }}
-            >
-              <option value="auto">Auto</option>
-              <option value="openai">OpenAI</option>
-              <option value="claude">Claude</option>
-            </select>
+            <div style={{ ...smallButtonStyle, cursor: "default", padding: "8px 12px" }}>
+              Smart Mode
+            </div>
+            {activeGoalWorkspace && (
+              <div style={{ minWidth: isMobile ? 110 : 220 }}>
+                <div style={{ fontSize: 11, color: "#84d9ff", marginBottom: 6 }}>
+                  Goal: {activeGoalWorkspace.goalLabel}
+                </div>
+                <div style={{ height: 8, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${activeGoalProgress}%`,
+                      height: "100%",
+                      background: "linear-gradient(90deg, #46c2ff, #73f0c6)"
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <div
@@ -4685,7 +4929,7 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
               <button
                 type="button"
                 style={smallButtonStyle}
-                onClick={() => applyQuickPrompt("Execute this for me with assets, templates, and messages.")}
+                onClick={() => openDoItForMe()}
               >
                 Do it for me
               </button>
