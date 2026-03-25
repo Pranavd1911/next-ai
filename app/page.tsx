@@ -353,6 +353,7 @@ export default function Home() {
   const [goalAnswerDraft, setGoalAnswerDraft] = useState("");
   const [goalQuestionIndex, setGoalQuestionIndex] = useState(0);
   const [showDoItModal, setShowDoItModal] = useState(false);
+  const [celebrationText, setCelebrationText] = useState("");
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [codeModeEnabled, setCodeModeEnabled] = useState(false);
   const [prefersDirectAnswers, setPrefersDirectAnswers] = useState(true);
@@ -421,6 +422,11 @@ export default function Home() {
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 3500);
+  }
+
+  function celebrate(message: string) {
+    setCelebrationText(message);
+    window.setTimeout(() => setCelebrationText(""), 1800);
   }
 
   async function apiFetch(input: string, init: RequestInit = {}) {
@@ -2616,20 +2622,34 @@ export default function Home() {
   function toggleTaskCompletion(taskId: string) {
     if (!activeGoalWorkspace) return;
 
+    let completed = false;
     updateWorkspace((current) => ({
       ...current,
+      momentum: {
+        streakDays: current.momentum.streakDays + 1,
+        completedActions: current.momentum.completedActions + 1,
+        lastCompletedAt: new Date().toISOString()
+      },
       workspaces: current.workspaces.map((workspace) =>
         workspace.goalId === activeGoalWorkspace.goalId
           ? {
               ...workspace,
-              tasks: workspace.tasks.map((task) =>
-                task.id === taskId ? { ...task, completed: !task.completed } : task
-              )
+              tasks: workspace.tasks.map((task) => {
+                if (task.id !== taskId) return task;
+                completed = !task.completed;
+                return { ...task, completed: !task.completed };
+              })
             }
           : workspace
       ),
       updatedAt: new Date().toISOString()
     }));
+
+    if (completed) {
+      celebrate("Confetti: +10% progress");
+      showToast("+10% progress. You're ahead of 70% of users.", "success");
+      void recordAnalyticsEvent("task_completed", { taskId });
+    }
   }
 
   function toggleMilestone(milestoneId: string) {
@@ -2762,11 +2782,60 @@ export default function Home() {
 
   function openDoItForMe(option?: string) {
     if (option) {
-      setInput(
-        `Do it for me: ${option}\nCurrent goal: ${activeGoalWorkspace?.goalLabel || "My goal"}`
-      );
+      if (activeGoalWorkspace) {
+        const instantOutputs: OutputCard[] = [
+          {
+            id: "instant-resume",
+            title: "Resume",
+            kind: "resume",
+            cta: "Download",
+            content: `Instant ${activeGoalWorkspace.goalLabel} resume draft with quantified bullets and positioning.`
+          },
+          {
+            id: "instant-email",
+            title: "Cold Email",
+            kind: "message",
+            cta: "Copy",
+            content: `Fast outreach draft for ${activeGoalWorkspace.goalLabel} with a direct ask and strong hook.`
+          },
+          {
+            id: "instant-plan",
+            title: "Execution Plan",
+            kind: "plan",
+            cta: "Execute this",
+            content: `Aggressive 7-day sprint for ${activeGoalWorkspace.goalLabel} with daily tasks and one dominant next action.`
+          },
+          {
+            id: "instant-companies",
+            title: "Target Companies",
+            kind: "strategy",
+            cta: "Edit",
+            content: `Curated company list and role targets for ${activeGoalWorkspace.goalLabel}.`
+          }
+        ];
+
+        updateWorkspace((current) => ({
+          ...current,
+          workspaces: current.workspaces.map((workspace) =>
+            workspace.goalId === activeGoalWorkspace.goalId
+              ? {
+                  ...workspace,
+                  outputs: instantOutputs,
+                  nextAction:
+                    workspace.goalId === "pm_internship"
+                      ? "Apply to Microsoft PM Intern role"
+                      : workspace.nextAction
+                }
+              : workspace
+          ),
+          updatedAt: new Date().toISOString()
+        }));
+      }
+
+      setInput(`Do it for me: ${option}\nCurrent goal: ${activeGoalWorkspace?.goalLabel || "My goal"}`);
       setShowDoItModal(false);
-      showToast(`${option} prepared instantly.`, "success");
+      celebrate("Confetti: +10% progress");
+      showToast(`${option} prepared instantly. 80% of the setup is done.`, "success");
       void recordAnalyticsEvent("do_it_for_me_selected", { option });
       return;
     }
@@ -2806,6 +2875,15 @@ export default function Home() {
         </button>
       </div>
     );
+  }
+
+  async function shareProgress() {
+    const progressMessage = activeGoalWorkspace
+      ? `I completed ${activeGoalProgress}% of my ${activeGoalWorkspace.goalLabel} journey using NEXA`
+      : "I started my plan with NEXA";
+    await navigator.clipboard.writeText(progressMessage);
+    showToast("Progress update copied to clipboard.", "success");
+    void recordAnalyticsEvent("share_progress");
   }
 
   function renderGoalIntake() {
@@ -2990,7 +3068,7 @@ export default function Home() {
               />
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
                 <button style={primaryButtonStyle} onClick={() => void submitGoalAnswer()}>
-                  {goalQuestionIndex === goalQuestions.length - 1 ? "Generate dashboard" : "Next question"}
+                  {goalQuestionIndex === goalQuestions.length - 1 ? "Your Plan Is Ready" : "Next question"}
                 </button>
                 <button
                   style={smallButtonStyle}
@@ -3026,6 +3104,9 @@ export default function Home() {
           padding: isMobile ? "0 16px 30px" : "0 20px 36px"
         }}
       >
+        <div style={{ marginBottom: 14, fontSize: 12, color: "#84d9ff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+          🎯 Your Plan Is Ready
+        </div>
         <div
           style={{
             display: "grid",
@@ -3071,6 +3152,31 @@ export default function Home() {
                 Voice mode
               </button>
             </div>
+
+            <div
+              style={{
+                marginTop: 18,
+                borderRadius: 24,
+                padding: isMobile ? 18 : 22,
+                background: "linear-gradient(135deg, rgba(70,194,255,0.16), rgba(115,240,198,0.14))",
+                border: "1px solid rgba(115,240,198,0.24)"
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#dff9ef", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Do This Now
+              </div>
+              <div style={{ marginTop: 10, fontSize: isMobile ? 28 : 40, fontWeight: 800, lineHeight: 1.05 }}>
+                → {workspace.nextAction}
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+                <button style={primaryButtonStyle} onClick={() => toggleTaskCompletion(workspace.tasks[0]?.id || "")}>
+                  Mark as Done
+                </button>
+                <button style={smallButtonStyle} onClick={() => setInput(`Execute this next action now:\n${workspace.nextAction}`)}>
+                  Execute now
+                </button>
+              </div>
+            </div>
           </div>
 
           <div
@@ -3099,6 +3205,9 @@ export default function Home() {
                 </div>
                 <div style={{ marginTop: 10, fontSize: 14, fontWeight: 700 }}>
                   Goal: {workspace.goalLabel} • {activeGoalProgress}%
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "#9cb0c8" }}>
+                  Streak 🔥 {personalWorkspace.momentum.streakDays} days
                 </div>
               </div>
               {[
@@ -3139,13 +3248,13 @@ export default function Home() {
           }}
         >
           {[
-            { title: "📋 Step-by-step plan", body: workspace.stepPlan.join("\n") },
+            { title: "📋 Plan Card", body: workspace.stepPlan.join("\n") },
             {
-              title: "📅 Weekly roadmap",
+              title: "📅 Weekly Plan",
               body: workspace.roadmap.map((week) => `${week.title}: ${week.focus}`).join("\n")
             },
             {
-              title: "🎯 Tasks checklist",
+              title: "🎯 Next Action Queue",
               body: workspace.tasks.map((task) => `${task.completed ? "[x]" : "[ ]"} ${task.title}`).join("\n")
             },
             {
@@ -3313,6 +3422,34 @@ export default function Home() {
           }}
         >
           {[
+            { label: "Streaks 🔥", value: `${personalWorkspace.momentum.streakDays} day streak` },
+            { label: "Progress %", value: `${activeGoalProgress}% complete` },
+            { label: "Leaderboard", value: "You're ahead of 70% users" }
+          ].map((item) => (
+            <div
+              key={item.label}
+              style={{
+                borderRadius: 22,
+                padding: 16,
+                background: "rgba(10,20,35,0.82)",
+                border: "1px solid rgba(126,164,206,0.12)"
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#84d9ff", marginBottom: 8 }}>{item.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          {[
             {
               title: "Free Plan",
               body: "3 plans/day\nBasic outputs",
@@ -3448,6 +3585,65 @@ Execute clicks: ${personalWorkspace.analytics.executeClicks}
 Share clicks: ${personalWorkspace.analytics.shareClicks}
 Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
             </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          <div
+            style={{
+              borderRadius: 24,
+              padding: 18,
+              background: "rgba(10,20,35,0.82)",
+              border: "1px solid rgba(126,164,206,0.12)"
+            }}
+          >
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Weekly Check-in AI</div>
+            <div style={{ color: "#c9d9eb", lineHeight: 1.7 }}>
+              Did you complete this? Here’s what to do today.
+            </div>
+            <div style={{ marginTop: 12, fontWeight: 700 }}>
+              Today: {workspace.tasks.find((task) => !task.completed)?.title || workspace.nextAction}
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+              <button
+                style={smallButtonStyle}
+                onClick={() => toggleTaskCompletion(workspace.tasks.find((task) => !task.completed)?.id || "")}
+              >
+                Yes, completed
+              </button>
+              <button
+                style={smallButtonStyle}
+                onClick={() => setInput(`Weekly check-in for ${workspace.goalLabel}: tell me what to do today.`)}
+              >
+                Tell me today's move
+              </button>
+            </div>
+          </div>
+          <div
+            style={{
+              borderRadius: 24,
+              padding: 18,
+              background: "rgba(10,20,35,0.82)",
+              border: "1px solid rgba(126,164,206,0.12)"
+            }}
+          >
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Viral Feature</div>
+            <div style={{ color: "#c9d9eb", lineHeight: 1.7 }}>
+              Share your progress:
+            </div>
+            <div style={{ marginTop: 12, fontWeight: 700 }}>
+              “I completed {activeGoalProgress}% of my {workspace.goalLabel} journey using NEXA”
+            </div>
+            <button style={{ ...primaryButtonStyle, marginTop: 14 }} onClick={() => void shareProgress()}>
+              Share your progress
+            </button>
           </div>
         </div>
 
@@ -3732,8 +3928,8 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
           gap: 8,
           pointerEvents: "none"
         }}
-      >
-        {toasts.map((toast) => (
+        >
+          {toasts.map((toast) => (
           <div
             key={toast.id}
             data-testid="toast"
@@ -3756,8 +3952,28 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
           >
             {toast.message}
           </div>
-        ))}
+          ))}
       </div>
+
+      {celebrationText && (
+        <div
+          style={{
+            position: "fixed",
+            left: "50%",
+            top: 20,
+            transform: "translateX(-50%)",
+            zIndex: 130,
+            padding: "12px 18px",
+            borderRadius: 999,
+            background: "linear-gradient(135deg, rgba(115,240,198,0.96), rgba(70,194,255,0.96))",
+            color: "#042033",
+            fontWeight: 800,
+            boxShadow: "0 18px 42px rgba(0,0,0,0.25)"
+          }}
+        >
+          {celebrationText}
+        </div>
+      )}
 
       {isMobile && mobileActionsOpen && (
         <div

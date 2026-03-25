@@ -77,6 +77,11 @@ export type PersonalWorkspace = {
     date: string;
     goalsCreated: number;
   };
+  momentum: {
+    streakDays: number;
+    completedActions: number;
+    lastCompletedAt: string | null;
+  };
   analytics: WorkspaceAnalytics;
   updatedAt: string;
 };
@@ -601,7 +606,7 @@ function buildOutputs(goalId: GoalId, answers: Record<string, string>): OutputCa
 }
 
 export function getGoalQuestions(goalId: GoalId) {
-  return GOAL_QUESTIONS[goalId];
+  return GOAL_QUESTIONS[goalId].slice(0, 2);
 }
 
 export function createWorkspace(goalId: GoalId, answers: Record<string, string>): GoalWorkspace {
@@ -638,6 +643,11 @@ export function createEmptyWorkspace(): PersonalWorkspace {
     usage: {
       date: new Date().toISOString().slice(0, 10),
       goalsCreated: 0
+    },
+    momentum: {
+      streakDays: 3,
+      completedActions: 0,
+      lastCompletedAt: null
     },
     analytics: {
       goalClicks: {
