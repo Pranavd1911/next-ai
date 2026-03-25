@@ -3531,6 +3531,9 @@ export default function Home() {
               Free plan shows basic outputs only. Upgrade to Pro to unlock all execution cards.
             </div>
           )}
+          <div style={{ marginTop: 12, color: "#9cb0c8", fontSize: 12 }}>
+            AI-generated content. Verify before use.
+          </div>
         </div>
 
         <div
@@ -4258,14 +4261,8 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
             <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 10 }}>
               AI Disclaimer
             </div>
-            <div style={{ color: "#c9d9eb", lineHeight: 1.75, whiteSpace: "pre-wrap" }}>
-              {`NEXA provides AI-generated plans, suggestions, and outputs for informational and productivity purposes only.
-
-- Outputs may not be accurate, complete, or suitable for your specific situation
-- NEXA does not provide professional, legal, medical, or financial advice
-- Users are responsible for reviewing and making their own decisions
-
-Use NEXA as a tool to assist your actions, not as a sole decision-maker.`}
+            <div style={{ color: "#c9d9eb", lineHeight: 1.75 }}>
+              NEXA provides AI-generated suggestions. Please review outputs before taking action.
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
               <button
