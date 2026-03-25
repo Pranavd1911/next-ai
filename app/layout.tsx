@@ -22,7 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/disclaimer">Disclaimer</a>
             </div>
             <div className="site-footer-note">
-              NEXA provides AI-generated suggestions for informational purposes only. Users are responsible for their own decisions.
+              NEXA provides AI-generated plans, suggestions, and outputs for informational and productivity purposes only. Users are responsible for reviewing and making their own decisions.
             </div>
           </div>
         </footer>

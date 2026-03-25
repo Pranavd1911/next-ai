@@ -367,6 +367,7 @@ export default function Home() {
   const [goalAnswerDraft, setGoalAnswerDraft] = useState("");
   const [goalQuestionIndex, setGoalQuestionIndex] = useState(0);
   const [showDoItModal, setShowDoItModal] = useState(false);
+  const [showFirstUseDisclaimer, setShowFirstUseDisclaimer] = useState(false);
   const [celebrationText, setCelebrationText] = useState("");
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [codeModeEnabled, setCodeModeEnabled] = useState(false);
@@ -1075,6 +1076,16 @@ export default function Home() {
       );
     } catch {}
   }, [personalWorkspace, workspaceOwnerId, workspaceReady]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const key = "nexa_disclaimer_ack_v1";
+    const acknowledged = window.localStorage.getItem(key);
+    if (!acknowledged) {
+      setShowFirstUseDisclaimer(true);
+    }
+  }, []);
 
   useEffect(() => {
     function handleResize() {
@@ -4217,6 +4228,58 @@ Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
                   {option}
                 </button>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFirstUseDisclaimer && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.62)",
+            zIndex: 95,
+            display: "grid",
+            placeItems: "center",
+            padding: 16
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 640,
+              borderRadius: 26,
+              padding: 24,
+              background: "linear-gradient(180deg, rgba(14,28,47,0.98), rgba(8,17,31,0.98))",
+              border: "1px solid rgba(126,164,206,0.14)"
+            }}
+          >
+            <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 10 }}>
+              AI Disclaimer
+            </div>
+            <div style={{ color: "#c9d9eb", lineHeight: 1.75, whiteSpace: "pre-wrap" }}>
+              {`NEXA provides AI-generated plans, suggestions, and outputs for informational and productivity purposes only.
+
+- Outputs may not be accurate, complete, or suitable for your specific situation
+- NEXA does not provide professional, legal, medical, or financial advice
+- Users are responsible for reviewing and making their own decisions
+
+Use NEXA as a tool to assist your actions, not as a sole decision-maker.`}
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
+              <button
+                style={primaryButtonStyle}
+                onClick={() => {
+                  window.localStorage.setItem("nexa_disclaimer_ack_v1", "true");
+                  setShowFirstUseDisclaimer(false);
+                }}
+              >
+                I Understand
+              </button>
+              <a href="/disclaimer" className="button">
+                Read full disclaimer
+              </a>
             </div>
           </div>
         </div>
