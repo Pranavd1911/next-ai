@@ -23,6 +23,20 @@ import {
   parseFileMessage,
   type ParsedFileMessage
 } from "@/lib/file-messages";
+import {
+  GOAL_OPTIONS,
+  computeProgress,
+  createEmptyWorkspace,
+  createWorkspace,
+  getDailyGoalUsage,
+  getGoalQuestions,
+  getWorkspaceStorageKey,
+  type GoalId,
+  type GoalQuestion,
+  type GoalWorkspace,
+  type OutputCard,
+  type PersonalWorkspace
+} from "@/lib/nexa-workspace";
 
 declare global {
   interface Window {
@@ -331,6 +345,13 @@ export default function Home() {
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [voiceStatus, setVoiceStatus] = useState("Wake phrase: Hey Nexa");
   const [rememberedMemory, setRememberedMemory] = useState("");
+  const [personalWorkspace, setPersonalWorkspace] =
+    useState<PersonalWorkspace>(createEmptyWorkspace());
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [selectedGoalId, setSelectedGoalId] = useState<GoalId | null>(null);
+  const [goalAnswers, setGoalAnswers] = useState<Record<string, string>>({});
+  const [goalAnswerDraft, setGoalAnswerDraft] = useState("");
+  const [goalQuestionIndex, setGoalQuestionIndex] = useState(0);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [codeModeEnabled, setCodeModeEnabled] = useState(false);
   const [prefersDirectAnswers, setPrefersDirectAnswers] = useState(true);
@@ -363,6 +384,22 @@ export default function Home() {
   const historyInFlightRef = useRef(new Set<string>());
 
   const guestId = typeof window !== "undefined" ? getGuestId() : null;
+  const workspaceOwnerId = userId || guestId || "anonymous";
+  const activeGoalWorkspace = useMemo(() => {
+    if (!personalWorkspace.activeGoalId) return null;
+    return (
+      personalWorkspace.workspaces.find(
+        (workspace) => workspace.goalId === personalWorkspace.activeGoalId
+      ) || null
+    );
+  }, [personalWorkspace]);
+  const activeGoalProgress = computeProgress(activeGoalWorkspace);
+  const tasksRemaining = activeGoalWorkspace
+    ? activeGoalWorkspace.tasks.filter((task) => !task.completed).length
+    : 0;
+  const goalQuestions = selectedGoalId ? getGoalQuestions(selectedGoalId) : [];
+  const currentGoalQuestion =
+    goalQuestions.length > 0 ? goalQuestions[goalQuestionIndex] : null;
 
   const selectedFileLabel =
     selectedFiles.length === 1
@@ -415,6 +452,25 @@ export default function Home() {
           message: params.message,
           stack: params.stack || "",
           href: typeof window !== "undefined" ? window.location.href : ""
+        })
+      });
+    } catch {}
+  }
+
+  async function recordAnalyticsEvent(
+    eventName: string,
+    metadata: Record<string, unknown> = {}
+  ) {
+    try {
+      await apiFetch("/api/analytics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          guestId,
+          chatId: activeChatIdRef.current,
+          eventName,
+          metadata
         })
       });
     } catch {}
@@ -965,6 +1021,38 @@ export default function Home() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = localStorage.getItem(getWorkspaceStorageKey(workspaceOwnerId));
+      if (raw) {
+        const parsed = JSON.parse(raw) as PersonalWorkspace;
+        setPersonalWorkspace(parsed);
+      } else {
+        setPersonalWorkspace(createEmptyWorkspace());
+      }
+    } catch {
+      setPersonalWorkspace(createEmptyWorkspace());
+    } finally {
+      setWorkspaceReady(true);
+    }
+  }, [workspaceOwnerId]);
+
+  useEffect(() => {
+    if (!workspaceReady || typeof window === "undefined") return;
+
+    try {
+      localStorage.setItem(
+        getWorkspaceStorageKey(workspaceOwnerId),
+        JSON.stringify({
+          ...personalWorkspace,
+          updatedAt: new Date().toISOString()
+        })
+      );
+    } catch {}
+  }, [personalWorkspace, workspaceOwnerId, workspaceReady]);
 
   useEffect(() => {
     function handleResize() {
@@ -2355,6 +2443,864 @@ export default function Home() {
     return segments.filter((s) => s.content.length > 0);
   }
 
+  function updateWorkspace(
+    updater: (current: PersonalWorkspace) => PersonalWorkspace
+  ) {
+    setPersonalWorkspace((current) => updater(current));
+  }
+
+  function trackWorkspaceUpdate(
+    updater: (analytics: PersonalWorkspace["analytics"]) => PersonalWorkspace["analytics"]
+  ) {
+    updateWorkspace((current) => ({
+      ...current,
+      analytics: updater(current.analytics),
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function selectGoal(goalId: GoalId) {
+    const usage = getDailyGoalUsage(personalWorkspace);
+    if (
+      personalWorkspace.preferences.pricingPlan === "free" &&
+      usage.goalsCreated >= 3
+    ) {
+      showToast("Free plan reached today's goal limit. Upgrade to Pro for unlimited execution.");
+      void recordAnalyticsEvent("goal_limit_reached", {
+        goalId,
+        pricingPlan: personalWorkspace.preferences.pricingPlan
+      });
+      return;
+    }
+
+    setSelectedGoalId(goalId);
+    setGoalAnswers({});
+    setGoalAnswerDraft("");
+    setGoalQuestionIndex(0);
+    void recordAnalyticsEvent("goal_selected", {
+      goalId,
+      pricingPlan: personalWorkspace.preferences.pricingPlan
+    });
+    updateWorkspace((current) => ({
+      ...current,
+      activeGoalId: goalId,
+      analytics: {
+        ...current.analytics,
+        goalClicks: {
+          ...current.analytics.goalClicks,
+          [goalId]: (current.analytics.goalClicks[goalId] || 0) + 1
+        },
+        lastDropOffPoint: "goal_selected"
+      },
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  async function completeGoalIntake() {
+    if (!selectedGoalId) return;
+
+    const workspace = createWorkspace(selectedGoalId, goalAnswers);
+    const memorySnippet = [
+      `Current goal: ${workspace.goalLabel}`,
+      ...Object.entries(goalAnswers).map(([key, value]) => `${key.replace(/_/g, " ")}: ${value}`)
+    ]
+      .join("\n")
+      .slice(0, 2000);
+
+    setRememberedMemory(memorySnippet);
+    await savePreferences({ memory: memorySnippet });
+
+    updateWorkspace((current) => {
+      const usage = getDailyGoalUsage(current);
+      return {
+        ...current,
+        activeGoalId: selectedGoalId,
+        workspaces: [
+          workspace,
+          ...current.workspaces.filter((item) => item.goalId !== selectedGoalId)
+        ].slice(0, 8),
+        usage: {
+          ...usage,
+          goalsCreated: usage.goalsCreated + 1
+        },
+        analytics: {
+          ...current.analytics,
+          lastDropOffPoint: "plan_generated"
+        },
+        updatedAt: new Date().toISOString()
+      };
+    });
+
+    await recordAnalyticsEvent("goal_dashboard_generated", {
+      goalId: selectedGoalId
+    });
+
+    setGoalAnswerDraft("");
+    setGoalQuestionIndex(0);
+  }
+
+  async function submitGoalAnswer() {
+    if (!selectedGoalId || !currentGoalQuestion) return;
+
+    const value = goalAnswerDraft.trim();
+    if (!value) return;
+
+    const nextAnswers = {
+      ...goalAnswers,
+      [currentGoalQuestion.id]: value
+    };
+
+    setGoalAnswers(nextAnswers);
+    setGoalAnswerDraft("");
+
+    if (goalQuestionIndex >= goalQuestions.length - 1) {
+      const workspace = createWorkspace(selectedGoalId, nextAnswers);
+      const memorySnippet = [
+        `Current goal: ${workspace.goalLabel}`,
+        ...Object.entries(nextAnswers).map(([key, answer]) => `${key.replace(/_/g, " ")}: ${answer}`)
+      ]
+        .join("\n")
+        .slice(0, 2000);
+
+      setRememberedMemory(memorySnippet);
+      await savePreferences({ memory: memorySnippet });
+
+      updateWorkspace((current) => {
+        const usage = getDailyGoalUsage(current);
+        return {
+          ...current,
+          activeGoalId: selectedGoalId,
+          workspaces: [
+            workspace,
+            ...current.workspaces.filter((item) => item.goalId !== selectedGoalId)
+          ].slice(0, 8),
+          usage: {
+            ...usage,
+            goalsCreated: usage.goalsCreated + 1
+          },
+          analytics: {
+            ...current.analytics,
+            lastDropOffPoint: "plan_generated"
+          },
+          updatedAt: new Date().toISOString()
+        };
+      });
+      await recordAnalyticsEvent("goal_dashboard_generated", {
+        goalId: selectedGoalId,
+        answerCount: Object.keys(nextAnswers).length
+      });
+      setGoalQuestionIndex(0);
+      return;
+    }
+
+    setGoalQuestionIndex((index) => index + 1);
+    trackWorkspaceUpdate((analytics) => ({
+      ...analytics,
+      lastDropOffPoint: `question_${goalQuestionIndex + 1}`
+    }));
+  }
+
+  function setPricingPlan(plan: "free" | "pro") {
+    void recordAnalyticsEvent("pricing_plan_selected", { plan });
+    updateWorkspace((current) => ({
+      ...current,
+      preferences: {
+        ...current.preferences,
+        pricingPlan: plan
+      },
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function toggleTaskCompletion(taskId: string) {
+    if (!activeGoalWorkspace) return;
+
+    updateWorkspace((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.goalId === activeGoalWorkspace.goalId
+          ? {
+              ...workspace,
+              tasks: workspace.tasks.map((task) =>
+                task.id === taskId ? { ...task, completed: !task.completed } : task
+              )
+            }
+          : workspace
+      ),
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function toggleMilestone(milestoneId: string) {
+    if (!activeGoalWorkspace) return;
+
+    updateWorkspace((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.goalId === activeGoalWorkspace.goalId
+          ? {
+              ...workspace,
+              milestones: workspace.milestones.map((milestone) =>
+                milestone.id === milestoneId
+                  ? { ...milestone, done: !milestone.done }
+                  : milestone
+              )
+            }
+          : workspace
+      ),
+      updatedAt: new Date().toISOString()
+    }));
+  }
+
+  function downloadTextFile(filename: string, content: string) {
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleOutputAction(card: OutputCard) {
+    const action = card.cta.toLowerCase();
+
+    trackWorkspaceUpdate((analytics) => ({
+      ...analytics,
+      executeClicks: analytics.executeClicks + (action.includes("execute") ? 1 : 0),
+      templateClicks: analytics.templateClicks + (action.includes("edit") ? 1 : 0),
+      lastDropOffPoint: `output_${card.id}`
+    }));
+
+    if (action.includes("copy")) {
+      await navigator.clipboard.writeText(card.content);
+      await recordAnalyticsEvent("output_action", {
+        cardId: card.id,
+        action: "copy"
+      });
+      showToast(`${card.title} copied to clipboard.`, "success");
+      return;
+    }
+
+    if (action.includes("download")) {
+      downloadTextFile(`${card.title.toLowerCase().replace(/\s+/g, "-")}.txt`, card.content);
+      await recordAnalyticsEvent("output_action", {
+        cardId: card.id,
+        action: "download"
+      });
+      showToast(`${card.title} downloaded.`, "success");
+      return;
+    }
+
+    if (action.includes("edit")) {
+      setInput(`Refine this ${card.title.toLowerCase()}:\n${card.content}`);
+      await recordAnalyticsEvent("output_action", {
+        cardId: card.id,
+        action: "edit"
+      });
+      showToast(`${card.title} loaded into the command bar.`, "success");
+      return;
+    }
+
+    setInput(`Execute this for my ${activeGoalWorkspace?.goalLabel || "goal"}:\n${card.content}`);
+    await recordAnalyticsEvent("output_action", {
+      cardId: card.id,
+      action: "execute"
+    });
+    showToast("Execution request prepared in the command bar.", "success");
+  }
+
+  async function shareGoalPlan() {
+    if (!activeGoalWorkspace) return;
+
+    const payload = {
+      goalLabel: activeGoalWorkspace.goalLabel,
+      recommendation: activeGoalWorkspace.recommendation,
+      reasoning: activeGoalWorkspace.reasoning,
+      nextAction: activeGoalWorkspace.nextAction,
+      progress: activeGoalProgress,
+      stepPlan: activeGoalWorkspace.stepPlan,
+      roadmap: activeGoalWorkspace.roadmap,
+      tasks: activeGoalWorkspace.tasks,
+      milestones: activeGoalWorkspace.milestones
+    };
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    const shareUrl = `${window.location.origin}/share/plan?payload=${encodeURIComponent(encoded)}`;
+
+    await navigator.clipboard.writeText(shareUrl);
+    trackWorkspaceUpdate((analytics) => ({
+      ...analytics,
+      shareClicks: analytics.shareClicks + 1,
+      lastDropOffPoint: "shared_plan"
+    }));
+    await recordAnalyticsEvent("goal_plan_shared", {
+      goalId: activeGoalWorkspace.goalId
+    });
+    showToast("Share link copied to clipboard.", "success");
+  }
+
+  function markIntegrationClick() {
+    void recordAnalyticsEvent("integration_click");
+    trackWorkspaceUpdate((analytics) => ({
+      ...analytics,
+      integrationClicks: analytics.integrationClicks + 1,
+      lastDropOffPoint: "integration_clicked"
+    }));
+    showToast("Integration mapped to the next execution step.", "success");
+  }
+
+  function markVoiceMode() {
+    void recordAnalyticsEvent("voice_mode_toggle");
+    trackWorkspaceUpdate((analytics) => ({
+      ...analytics,
+      voiceClicks: analytics.voiceClicks + 1,
+      lastDropOffPoint: "voice_mode"
+    }));
+    toggleFullVoiceMode();
+  }
+
+  function renderGoalIntake() {
+    return (
+      <div
+        style={{
+          maxWidth: 1080,
+          margin: isMobile ? "24px auto 0 auto" : "40px auto 0 auto",
+          padding: isMobile ? "0 16px 32px" : "0 20px 32px"
+        }}
+      >
+        <div
+          style={{
+            borderRadius: 28,
+            border: "1px solid rgba(126,164,206,0.14)",
+            padding: isMobile ? 22 : 28,
+            background:
+              "linear-gradient(135deg, rgba(12,24,42,0.92), rgba(8,17,31,0.96))",
+            boxShadow: "0 26px 60px rgba(2,8,16,0.28)"
+          }}
+        >
+          <div
+            style={{
+              fontSize: isMobile ? 30 : 46,
+              fontWeight: 700,
+              lineHeight: 1.04,
+              letterSpacing: "-0.06em",
+              fontFamily: "var(--font-display)",
+              maxWidth: 760
+            }}
+          >
+            What do you want to achieve today?
+          </div>
+          <div
+            style={{
+              marginTop: 12,
+              maxWidth: 720,
+              color: "#a8bdd5",
+              fontSize: isMobile ? 14 : 17,
+              lineHeight: 1.7
+            }}
+          >
+            Pick one goal, answer a few smart questions, and get a structured execution dashboard instead of a chat thread.
+          </div>
+
+          <div
+            style={{
+              marginTop: 24,
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+              gap: 14
+            }}
+          >
+            {GOAL_OPTIONS.map((goal) => (
+              <button
+                key={goal.id}
+                onClick={() => selectGoal(goal.id)}
+                style={{
+                  textAlign: "left",
+                  padding: isMobile ? 18 : 20,
+                  borderRadius: 22,
+                  border:
+                    selectedGoalId === goal.id
+                      ? `1px solid ${goal.accent}`
+                      : "1px solid rgba(126,164,206,0.14)",
+                  background:
+                    selectedGoalId === goal.id
+                      ? "linear-gradient(135deg, rgba(23,45,72,0.96), rgba(13,26,45,0.98))"
+                      : "rgba(11,22,38,0.75)",
+                  color: "white",
+                  cursor: "pointer"
+                }}
+              >
+                <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+                  {goal.label}
+                </div>
+                <div style={{ color: "#9cb0c8", lineHeight: 1.6 }}>{goal.blurb}</div>
+              </button>
+            ))}
+          </div>
+
+          {selectedGoalId && currentGoalQuestion && (
+            <div
+              style={{
+                marginTop: 24,
+                padding: isMobile ? 18 : 22,
+                borderRadius: 24,
+                background: "rgba(7,15,27,0.7)",
+                border: "1px solid rgba(126,164,206,0.14)"
+              }}
+            >
+              <div style={{ color: "#84d9ff", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Smart Questions {goalQuestionIndex + 1}/{goalQuestions.length}
+              </div>
+              <div style={{ marginTop: 10, fontSize: 24, fontWeight: 700 }}>
+                {currentGoalQuestion.label}
+              </div>
+              <div style={{ marginTop: 8, color: "#9cb0c8", lineHeight: 1.6 }}>
+                Give enough detail that Nexa can recommend one best path, not ten vague options.
+              </div>
+              <textarea
+                value={goalAnswerDraft}
+                onChange={(e) => setGoalAnswerDraft(e.target.value)}
+                placeholder={currentGoalQuestion.placeholder}
+                style={{
+                  width: "100%",
+                  minHeight: 110,
+                  marginTop: 16,
+                  padding: 14,
+                  borderRadius: 18,
+                  border: "1px solid rgba(126,164,206,0.14)",
+                  background: "rgba(11,22,38,0.92)",
+                  color: "white",
+                  resize: "vertical"
+                }}
+              />
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+                <button style={primaryButtonStyle} onClick={() => void submitGoalAnswer()}>
+                  {goalQuestionIndex === goalQuestions.length - 1 ? "Generate dashboard" : "Next question"}
+                </button>
+                <button
+                  style={smallButtonStyle}
+                  onClick={() =>
+                    trackWorkspaceUpdate((analytics) => ({
+                      ...analytics,
+                      lastDropOffPoint: "question_skipped"
+                    }))
+                  }
+                >
+                  Keep current answer quality high
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderGoalDashboard(workspace: GoalWorkspace) {
+    const usage = getDailyGoalUsage(personalWorkspace);
+    const visibleOutputs =
+      personalWorkspace.preferences.pricingPlan === "pro"
+        ? workspace.outputs
+        : workspace.outputs.slice(0, 2);
+
+    return (
+      <div
+        style={{
+          maxWidth: 1160,
+          margin: isMobile ? "18px auto 0 auto" : "24px auto 0 auto",
+          padding: isMobile ? "0 16px 30px" : "0 20px 36px"
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "1.25fr 0.75fr",
+            gap: 16
+          }}
+        >
+          <div
+            style={{
+              padding: isMobile ? 20 : 24,
+              borderRadius: 28,
+              background:
+                "linear-gradient(135deg, rgba(16,32,55,0.96), rgba(9,18,31,0.98))",
+              border: "1px solid rgba(126,164,206,0.14)"
+            }}
+          >
+            <div style={{ fontSize: 12, color: "#84d9ff", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              Current goal
+            </div>
+            <div style={{ marginTop: 10, fontSize: isMobile ? 28 : 40, fontWeight: 700, lineHeight: 1.05, letterSpacing: "-0.05em" }}>
+              {workspace.goalLabel}
+            </div>
+            <div style={{ marginTop: 14, fontSize: isMobile ? 18 : 22, fontWeight: 700 }}>
+              {workspace.recommendation}
+            </div>
+            <div style={{ marginTop: 8, color: "#a8bdd5", lineHeight: 1.7, maxWidth: 760 }}>
+              {workspace.reasoning}
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 18 }}>
+              <button style={primaryButtonStyle} onClick={() => setInput(`Execute this goal:\n${workspace.recommendation}`)}>
+                Execute this
+              </button>
+              <button style={smallButtonStyle} onClick={() => updateWorkspace((current) => ({ ...current, activeGoalId: null, updatedAt: new Date().toISOString() }))}>
+                Change goal
+              </button>
+              <button style={smallButtonStyle} onClick={() => void shareGoalPlan()}>
+                Share your plan
+              </button>
+              <button style={smallButtonStyle} onClick={markVoiceMode}>
+                Voice mode
+              </button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: 12
+            }}
+          >
+              {[
+                { label: "Progress %", value: `${activeGoalProgress}%` },
+                { label: "Tasks remaining", value: String(tasksRemaining) },
+                { label: "Next action", value: workspace.nextAction },
+                {
+                  label: "Memory",
+                  value: rememberedMemory
+                    ? `Based on your goal of ${Object.values(workspace.answers)[0] || workspace.goalLabel}...`
+                    : "Memory warming up"
+                }
+              ].map((item) => (
+              <div
+                key={item.label}
+                style={{
+                  padding: 16,
+                  borderRadius: 22,
+                  background: "rgba(10,20,35,0.82)",
+                  border: "1px solid rgba(126,164,206,0.12)"
+                }}
+              >
+                <div style={{ fontSize: 12, color: "#84d9ff", marginBottom: 8 }}>{item.label}</div>
+                <div style={{ fontSize: item.label === "Next action" || item.label === "Memory" ? 15 : 28, fontWeight: 700, lineHeight: 1.35 }}>
+                  {item.value}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 16,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          {[
+            { title: "📋 Step-by-step plan", body: workspace.stepPlan.join("\n") },
+            {
+              title: "📅 Weekly roadmap",
+              body: workspace.roadmap.map((week) => `${week.title}: ${week.focus}`).join("\n")
+            },
+            {
+              title: "🎯 Tasks checklist",
+              body: workspace.tasks.map((task) => `${task.completed ? "[x]" : "[ ]"} ${task.title}`).join("\n")
+            },
+            {
+              title: "📊 Progress tracker",
+              body: workspace.milestones.map((milestone) => `${milestone.done ? "[x]" : "[ ]"} ${milestone.label} • ${milestone.target}`).join("\n")
+            }
+          ].map((card) => (
+            <div
+              key={card.title}
+              style={{
+                borderRadius: 24,
+                padding: 18,
+                background: "rgba(9,18,32,0.82)",
+                border: "1px solid rgba(126,164,206,0.12)",
+                minHeight: 220
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
+                {card.title}
+              </div>
+              <div style={{ whiteSpace: "pre-wrap", color: "#c9d9eb", lineHeight: 1.7, fontSize: 14 }}>
+                {card.body}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 12 }}>
+            Output Cards
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+              gap: 14
+            }}
+          >
+            {visibleOutputs.map((card) => (
+              <div
+                key={card.id}
+                style={{
+                  borderRadius: 24,
+                  padding: 18,
+                  background: "linear-gradient(180deg, rgba(14,28,47,0.92), rgba(8,17,31,0.96))",
+                  border: "1px solid rgba(126,164,206,0.12)"
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{card.title}</div>
+                  <span style={{ ...smallButtonStyle, cursor: "default" }}>{card.kind}</span>
+                </div>
+                <div style={{ whiteSpace: "pre-wrap", color: "#d3e0ef", lineHeight: 1.65, minHeight: 120 }}>
+                  {card.content}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+                  <button style={smallButtonStyle} onClick={() => void handleOutputAction(card)}>
+                    {card.cta}
+                  </button>
+                  <button style={smallButtonStyle} onClick={() => setInput(`Edit this ${card.title}:\n${card.content}`)}>
+                    Edit
+                  </button>
+                  <button
+                    style={smallButtonStyle}
+                    onClick={() =>
+                      downloadTextFile(
+                        `${card.title.toLowerCase().replace(/\s+/g, "-")}.txt`,
+                        card.content
+                      )
+                    }
+                  >
+                    Download
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {personalWorkspace.preferences.pricingPlan === "free" && workspace.outputs.length > visibleOutputs.length && (
+            <div style={{ marginTop: 12, color: "#f6c65b", fontSize: 13 }}>
+              Free plan shows basic outputs only. Upgrade to Pro to unlock all execution cards.
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          <div
+            style={{
+              borderRadius: 24,
+              padding: 18,
+              background: "rgba(10,20,35,0.82)",
+              border: "1px solid rgba(126,164,206,0.12)"
+            }}
+          >
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Tasks Remaining</div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {workspace.tasks.map((task) => (
+                <label
+                  key={task.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "10px 12px",
+                    borderRadius: 16,
+                    background: "rgba(255,255,255,0.03)"
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={task.completed}
+                    onChange={() => toggleTaskCompletion(task.id)}
+                  />
+                  <span style={{ flex: 1, color: task.completed ? "#8fb3d6" : "white" }}>
+                    {task.title}
+                  </span>
+                  <span style={{ color: "#84d9ff", fontSize: 12 }}>{task.dueLabel}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div
+            style={{
+              borderRadius: 24,
+              padding: 18,
+              background: "rgba(10,20,35,0.82)",
+              border: "1px solid rgba(126,164,206,0.12)"
+            }}
+          >
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Timeline & Milestones</div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {workspace.milestones.map((milestone) => (
+                <button
+                  key={milestone.id}
+                  onClick={() => toggleMilestone(milestone.id)}
+                  style={{
+                    textAlign: "left",
+                    padding: "12px 14px",
+                    borderRadius: 16,
+                    border: "1px solid rgba(126,164,206,0.12)",
+                    background: milestone.done ? "rgba(25,78,61,0.55)" : "rgba(255,255,255,0.03)",
+                    color: "white",
+                    cursor: "pointer"
+                  }}
+                >
+                  <div style={{ fontWeight: 700 }}>{milestone.label}</div>
+                  <div style={{ marginTop: 4, color: "#9cb0c8", fontSize: 13 }}>{milestone.target}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          {[
+            {
+              title: "Free Plan",
+              body: "Limited goals/day\nBasic outputs",
+              action: () => setPricingPlan("free"),
+              active: personalWorkspace.preferences.pricingPlan === "free"
+            },
+            {
+              title: "Pro Plan",
+              body: "₹499-₹999/month\nUnlimited execution\nAdvanced templates\nFaster responses",
+              action: () => setPricingPlan("pro"),
+              active: personalWorkspace.preferences.pricingPlan === "pro"
+            },
+            {
+              title: "Templates Library",
+              body: "Resume builder\nStartup idea validator\nJob application kit",
+              action: () =>
+                trackWorkspaceUpdate((analytics) => ({
+                  ...analytics,
+                  templateClicks: analytics.templateClicks + 1,
+                  lastDropOffPoint: "template_library"
+                })),
+              active: false
+            }
+          ].map((card) => (
+            <button
+              key={card.title}
+              onClick={card.action}
+              style={{
+                textAlign: "left",
+                padding: 18,
+                borderRadius: 24,
+                border: card.active
+                  ? "1px solid rgba(115,240,198,0.55)"
+                  : "1px solid rgba(126,164,206,0.12)",
+                background: "rgba(9,18,32,0.82)",
+                color: "white",
+                cursor: "pointer"
+              }}
+            >
+              <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>{card.title}</div>
+              <div style={{ whiteSpace: "pre-wrap", color: "#c9d9eb", lineHeight: 1.65 }}>
+                {card.body}
+              </div>
+              {card.title === "Free Plan" && (
+                <div style={{ marginTop: 10, fontSize: 12, color: "#9cb0c8" }}>
+                  {`${usage.goalsCreated}/3 goals used today`}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          {[
+            "Gmail -> send emails",
+            "Notion -> save plans",
+            "LinkedIn -> apply jobs"
+          ].map((item) => (
+            <button
+              key={item}
+              onClick={markIntegrationClick}
+              style={{
+                textAlign: "left",
+                padding: 18,
+                borderRadius: 22,
+                border: "1px solid rgba(126,164,206,0.12)",
+                background: "rgba(10,20,35,0.82)",
+                color: "white",
+                cursor: "pointer"
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{item}</div>
+            </button>
+          ))}
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+            gap: 14
+          }}
+        >
+          <div
+            style={{
+              borderRadius: 24,
+              padding: 18,
+              background: "rgba(10,20,35,0.82)",
+              border: "1px solid rgba(126,164,206,0.12)"
+            }}
+          >
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Growth Features</div>
+            <div style={{ color: "#c9d9eb", lineHeight: 1.7 }}>
+              {workspace.growthPrompt}
+              {"\n"}Viral loop enabled through shareable plan summaries and reusable templates.
+            </div>
+          </div>
+          <div
+            style={{
+              borderRadius: 24,
+              padding: 18,
+              background: "rgba(10,20,35,0.82)",
+              border: "1px solid rgba(126,164,206,0.12)"
+            }}
+          >
+            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>Analytics</div>
+            <div style={{ color: "#c9d9eb", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              {`Most used goal clicks: PM ${personalWorkspace.analytics.goalClicks.pm_internship}, Startup ${personalWorkspace.analytics.goalClicks.startup}, Money ${personalWorkspace.analytics.goalClicks.make_money}, Health ${personalWorkspace.analytics.goalClicks.improve_health}
+Execute clicks: ${personalWorkspace.analytics.executeClicks}
+Share clicks: ${personalWorkspace.analytics.shareClicks}
+Last drop-off: ${personalWorkspace.analytics.lastDropOffPoint}`}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const primaryButtonStyle: CSSProperties = {
     background: "linear-gradient(135deg, rgba(31,74,116,0.92), rgba(18,41,66,0.96))",
     color: "#f8fbff",
@@ -2703,6 +3649,36 @@ export default function Home() {
 
           <div
             style={{
+              marginBottom: 14,
+              padding: "14px 12px",
+              borderRadius: 18,
+              background: "rgba(12, 24, 42, 0.72)",
+              border: "1px solid rgba(126,164,206,0.1)"
+            }}
+          >
+            <div style={{ fontSize: 12, color: "#84d9ff", marginBottom: 8 }}>
+              Dashboard
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.4, marginBottom: 8 }}>
+              {activeGoalWorkspace?.goalLabel || "No active goal"}
+            </div>
+            <div style={{ fontSize: 13, color: "#9cb0c8", lineHeight: 1.6 }}>
+              {activeGoalWorkspace
+                ? `${activeGoalProgress}% progress • ${tasksRemaining} tasks remaining`
+                : "Pick a goal to unlock the execution dashboard."}
+            </div>
+            {activeGoalWorkspace && (
+              <button
+                style={{ ...smallButtonStyle, marginTop: 10 }}
+                onClick={() => setSelectedGoalId(activeGoalWorkspace.goalId)}
+              >
+                View goal
+              </button>
+            )}
+          </div>
+
+          <div
+            style={{
               fontSize: 13,
               color: "#bdbdbd",
               marginBottom: 10,
@@ -2866,7 +3842,7 @@ export default function Home() {
                 letterSpacing: "-0.04em"
               }}
             >
-              Nexa AI
+              {activeGoalWorkspace ? `Nexa AI • ${activeGoalWorkspace.goalLabel}` : "Nexa AI"}
             </div>
 
             <select
@@ -3164,64 +4140,10 @@ export default function Home() {
             padding: isMobile ? "12px 0 18px 0" : "24px 0"
           }}
         >
-          {messages.length === 0 ? (
-            <div
-              style={{
-                maxWidth: 800,
-                margin: isMobile ? "32px auto 0 auto" : "80px auto 0 auto",
-                textAlign: "center",
-                color: "#dce8f5",
-                padding: isMobile ? "0 16px" : "0 20px"
-              }}
-            >
-              <div
-                style={{
-                  fontSize: isMobile ? 28 : 42,
-                  fontWeight: 700,
-                  marginBottom: 12,
-                  lineHeight: 1.1,
-                  fontFamily: "var(--font-display)",
-                  letterSpacing: "-0.05em"
-                }}
-              >
-                How can I help you today?
-              </div>
-
-              <div style={{ color: "#9cb0c8", fontSize: isMobile ? 14 : 17, lineHeight: 1.7, maxWidth: 620, margin: "0 auto" }}>
-                One chat for text, code, images, files, camera, voice, and live answers.
-              </div>
-
-              <div
-                style={{
-                  marginTop: 16,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  background: "rgba(14, 28, 47, 0.9)",
-                  border: "1px solid rgba(126,164,206,0.18)",
-                  borderRadius: 999,
-                  padding: "10px 16px",
-                  fontSize: 13,
-                  color: "#dce8f5",
-                  maxWidth: "100%"
-                }}
-              >
-                <SparklesIcon width={16} height={16} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{voiceStatus}</span>
-              </div>
-
-              {!speechSupported && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    fontSize: 13,
-                    color: "#fbbf24"
-                  }}
-                >
-                  Microphone input is not supported in this browser.
-                </div>
-              )}
-            </div>
+          {activeGoalWorkspace ? (
+            renderGoalDashboard(activeGoalWorkspace)
+          ) : messages.length === 0 ? (
+            renderGoalIntake()
           ) : (
             <div style={{ maxWidth: 860, margin: "0 auto", padding: isMobile ? "0 10px" : "0 12px" }}>
               <div
@@ -3733,9 +4655,15 @@ export default function Home() {
                 type="button"
                 data-testid="share-chat-button"
                 style={smallButtonStyle}
-                onClick={shareCurrentChat}
+                onClick={() => {
+                  if (activeGoalWorkspace) {
+                    void shareGoalPlan();
+                    return;
+                  }
+                  void shareCurrentChat();
+                }}
               >
-                Share Chat
+                {activeGoalWorkspace ? "Share Plan" : "Share Chat"}
               </button>
             </div>
 
@@ -3750,27 +4678,23 @@ export default function Home() {
               <button
                 type="button"
                 style={smallButtonStyle}
-                onClick={() =>
-                  applyQuickPrompt("Build startup idea: target users, problem, solution, MVP, pricing, GTM.")
-                }
+                onClick={() => applyQuickPrompt("Generate the next best action for my current goal.")}
               >
-                Build startup idea
+                Next best action
               </button>
               <button
                 type="button"
                 style={smallButtonStyle}
-                onClick={() =>
-                  applyQuickPrompt("Fix my code. Explain the bug briefly, then give the corrected code.")
-                }
+                onClick={() => applyQuickPrompt("Execute this for me with assets, templates, and messages.")}
               >
-                Fix my code
+                Do it for me
               </button>
               <button
                 type="button"
                 style={smallButtonStyle}
-                onClick={() => applyQuickPrompt("Summarize this directly in concise points.")}
+                onClick={() => applyQuickPrompt("Give one best recommendation with reasoning.")}
               >
-                Summarize this
+                Smart decision
               </button>
             </div>
 
@@ -3986,7 +4910,9 @@ export default function Home() {
                           ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
                           : selectedFiles.length > 0
                             ? "Ask about the files/photos..."
-                            : "Message Nexa AI"
+                            : activeGoalWorkspace
+                              ? "Command bar: refine plan, generate assets, or execute tasks"
+                              : "Set a goal or ask Nexa to build one"
                       }
                     />
 
@@ -4212,7 +5138,9 @@ export default function Home() {
                           ? `Listening in ${getLanguageLabel(voiceLanguage)}...`
                           : selectedFiles.length > 0
                             ? "Ask about the files/photos, or press Send to upload only"
-                            : "Message Nexa AI"
+                            : activeGoalWorkspace
+                              ? "Command bar: refine plan, generate assets, or execute tasks"
+                              : "Set a goal or ask Nexa to build one"
                       }
                     />
 

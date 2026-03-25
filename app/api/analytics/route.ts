@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getFriendlyApiError } from "@/lib/api-guards";
 import {
+  resolveRequestOwnerId,
+  trackAnalyticsEvent,
   requireAuthenticatedUserId,
   supabaseAdmin
 } from "@/lib/server-data";
@@ -93,11 +95,24 @@ export async function GET(req: Request) {
       messages: bucket.messages
     }));
 
+    const goalUsage = (events || [])
+      .filter((event) => event.event_name === "goal_selected")
+      .reduce(
+        (acc, event) => {
+          const goalId =
+            typeof event.metadata?.goalId === "string" ? event.metadata.goalId : "unknown";
+          acc[goalId] = (acc[goalId] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>
+      );
+
     const response = NextResponse.json({
       dailyUsers: uniqueUsers,
       messagesPerUser,
       dropOffPoints,
-      dailySeries
+      dailySeries,
+      goalUsage
     });
     response.headers.set("X-Request-Id", trace.requestId);
     await finishRequestTrace({ trace, status: 200, ownerId });
@@ -115,6 +130,60 @@ export async function GET(req: Request) {
       ownerId,
       metadata: {
         error: error instanceof Error ? error.message : "Unknown analytics error"
+      }
+    });
+    return response;
+  }
+}
+
+export async function POST(req: Request) {
+  const trace = startRequestTrace("api/analytics:post");
+  let ownerId: string | null = null;
+
+  try {
+    const body = await req.json();
+    ownerId = await resolveRequestOwnerId(req, {
+      userId: body.userId,
+      guestId: body.guestId
+    });
+
+    const eventName =
+      typeof body.eventName === "string" && body.eventName.trim()
+        ? body.eventName.trim().slice(0, 80)
+        : "";
+
+    if (!eventName) {
+      const response = NextResponse.json({ error: "Event name is required." }, { status: 400 });
+      response.headers.set("X-Request-Id", trace.requestId);
+      await finishRequestTrace({ trace, status: 400, ownerId });
+      return response;
+    }
+
+    await trackAnalyticsEvent({
+      ownerId,
+      eventName,
+      chatId: typeof body.chatId === "string" ? body.chatId : null,
+      metadata:
+        body.metadata && typeof body.metadata === "object" ? body.metadata : {}
+    });
+
+    const response = NextResponse.json({ ok: true });
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({ trace, status: 200, ownerId, metadata: { eventName } });
+    return response;
+  } catch (error) {
+    const friendly = getFriendlyApiError(error, "Failed to track analytics.");
+    const response = NextResponse.json(
+      { error: friendly.message },
+      { status: friendly.status }
+    );
+    response.headers.set("X-Request-Id", trace.requestId);
+    await finishRequestTrace({
+      trace,
+      status: friendly.status,
+      ownerId,
+      metadata: {
+        error: error instanceof Error ? error.message : "Unknown analytics post error"
       }
     });
     return response;

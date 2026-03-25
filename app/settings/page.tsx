@@ -8,6 +8,7 @@ type AnalyticsData = {
   messagesPerUser: number;
   dropOffPoints: Array<{ createdAt: string; reason: string }>;
   dailySeries: Array<{ date: string; users: number; messages: number }>;
+  goalUsage?: Record<string, number>;
 };
 
 export default function SettingsPage() {
@@ -185,6 +186,35 @@ export default function SettingsPage() {
                   <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 18, color: "#9ca3af", fontSize: 13 }}>
                     <span>Blue: daily users</span>
                     <span>Green: messages</span>
+                  </div>
+
+                  <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
+                    Most used goals
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+                    {Object.entries(analytics.goalUsage || {}).length === 0 ? (
+                      <div className="muted-copy">No goal-selection events yet.</div>
+                    ) : (
+                      Object.entries(analytics.goalUsage || {})
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([goal, count]) => (
+                          <div
+                            key={goal}
+                            style={{
+                              background: "#2a2a2a",
+                              border: "1px solid #3a3a3a",
+                              borderRadius: 14,
+                              padding: "10px 12px"
+                            }}
+                          >
+                            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 4 }}>
+                              {goal}
+                            </div>
+                            <div style={{ fontWeight: 700 }}>{count}</div>
+                          </div>
+                        ))
+                    )}
                   </div>
 
                   <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>
